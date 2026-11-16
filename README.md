@@ -6,8 +6,8 @@ Final project for **DS6102 Data Warehousing and Information Retrieval** (Academi
 - Author: AYEBIE GRAM MESCHAC
 - Project window: 16 to 30 November 2026 (15 days)
 - Full exam paper: `docs/exam/DS6102_sujet.pdf`
-- Architecture version: v2 (16 November 2026)
 
+  
 This document is the project reference: what is built, how to run it, and the design
 decisions for the parts still to build. Sections marked **(planned)** describe a design
 that is not implemented yet.
