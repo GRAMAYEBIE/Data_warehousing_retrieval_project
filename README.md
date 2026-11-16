@@ -3,6 +3,7 @@
 End-to-end data warehouse, BI and AI analytics platform on NYC TLC Yellow Taxi trip records.
 Final project for **DS6102 Data Warehousing and Information Retrieval** (Academic City University, lecturer: Jeremiah Ishaya).
 
+- Author: AYEBIE GRAM MESCHAC
 - Project window: 16 to 30 November 2026 (15 days)
 - Full exam paper: `docs/exam/DS6102_sujet.pdf`
 - Architecture version: v2 (16 November 2026)
@@ -443,7 +444,7 @@ previous month. **Blocking tests are on silver.**
 Metrics are defined in `dbt/models/semantic/*.yml` (MetricFlow), the **single source of
 truth**. Each metric carries in `meta:` its `owner`, `sql_expression` (an aggregate
 expression on an `analytics` table), `base_table`, `grains`, `dimensions`, `filters` and
-`is_estimate`. Default owner: `Data Team`. Grains: day, week, month (and hour for
+`is_estimate`. Default owner: `AYEBIE GRAM MESCHAC (Data Team)`. Grains: day, week, month (and hour for
 demand).
 
 | # | Metric | Formula (at read time, on aggregates) | Filters and rules |
