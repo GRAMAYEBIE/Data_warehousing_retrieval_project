@@ -1,0 +1,28 @@
+# Source contract for NYC TLC Yellow Taxi monthly Parquet files, 2025-01 onwards.
+# Column names are the source names lower-cased (Airport_fee / airport_fee both occur).
+# family: integer | number (integer or float) | timestamp | string
+dataset: yellow
+version: v2025
+valid_from: "2025-01"
+columns:
+  - {name: vendorid, family: integer, required: true}
+  - {name: tpep_pickup_datetime, family: timestamp, required: true}
+  - {name: tpep_dropoff_datetime, family: timestamp, required: true}
+  - {name: passenger_count, family: number, required: true}
+  - {name: trip_distance, family: number, required: true}
+  - {name: ratecodeid, family: number, required: true}
+  - {name: store_and_fwd_flag, family: string, required: true}
+  - {name: pulocationid, family: integer, required: true}
+  - {name: dolocationid, family: integer, required: true}
+  - {name: payment_type, family: integer, required: true}
+  - {name: fare_amount, family: number, required: true}
+  - {name: extra, family: number, required: true}
+  - {name: mta_tax, family: number, required: true}
+  - {name: tip_amount, family: number, required: true}
+  - {name: tolls_amount, family: number, required: true}
+  - {name: improvement_surcharge, family: number, required: true}
+  - {name: total_amount, family: number, required: true}
+  - {name: congestion_surcharge, family: number, required: true}
+  - {name: airport_fee, family: number, required: true}
+  # MTA Central Business District congestion fee, collected from 2025-01-05.
+  - {name: cbd_congestion_fee, family: number, required: true}

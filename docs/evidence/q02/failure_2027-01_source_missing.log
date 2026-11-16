@@ -1,0 +1,11 @@
+ Container nyc-taxi-insight-hub-postgres-1 Running 
+ Container nyc-taxi-insight-hub-rustfs-1 Running 
+ Container nyc-taxi-insight-hub-postgres-1 Waiting 
+ Container nyc-taxi-insight-hub-rustfs-1 Waiting 
+ Container nyc-taxi-insight-hub-rustfs-1 Healthy 
+ Container nyc-taxi-insight-hub-postgres-1 Healthy 
+ Container nyc-taxi-insight-hub-ingestion-run-2652eca38032 Creating 
+ Container nyc-taxi-insight-hub-ingestion-run-2652eca38032 Created 
+2026-11-16 21:21:15,824 INFO ingestion.pipeline | batch ffe1e508-a963-40b9-96c3-b01375140fe5 started: month=2027-01 force=False url=https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2027-01.parquet
+2026-11-16 21:21:17,199 ERROR ingestion.pipeline | batch ffe1e508-a963-40b9-96c3-b01375140fe5 failed: source file not available (HTTP 403): https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2027-01.parquet
+

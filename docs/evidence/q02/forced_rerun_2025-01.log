@@ -1,0 +1,31 @@
+ Container nyc-taxi-insight-hub-rustfs-1 Running 
+ Container nyc-taxi-insight-hub-postgres-1 Running 
+ Container nyc-taxi-insight-hub-postgres-1 Waiting 
+ Container nyc-taxi-insight-hub-rustfs-1 Waiting 
+ Container nyc-taxi-insight-hub-rustfs-1 Healthy 
+ Container nyc-taxi-insight-hub-postgres-1 Healthy 
+ Container nyc-taxi-insight-hub-ingestion-run-17e4c03cfa81 Creating 
+ Container nyc-taxi-insight-hub-ingestion-run-17e4c03cfa81 Created 
+2026-11-16 21:59:27,076 INFO ingestion.pipeline | batch e50da471-8ad4-4711-9299-6a5caf3b6006 started: month=2025-01 force=True url=https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2025-01.parquet
+2026-11-16 22:05:43,626 INFO ingestion.pipeline | downloaded 59158238 bytes, sha256=9af277e4c0d3f9deb30644da822981e1e7df6af58313170fd3aa8a474485488a, rows=3475226
+2026-11-16 22:05:57,005 INFO ingestion.pipeline | landed s3://nyc-taxi-lake/raw/yellow/year=2025/month=01/yellow_tripdata_2025-01.parquet
+2026-11-16 22:06:22,181 INFO ingestion.bronze | bronze copy progress: 200000 / 3475226 rows
+2026-11-16 22:06:36,999 INFO ingestion.bronze | bronze copy progress: 400000 / 3475226 rows
+2026-11-16 22:06:50,157 INFO ingestion.bronze | bronze copy progress: 600000 / 3475226 rows
+2026-11-16 22:06:59,274 INFO ingestion.bronze | bronze copy progress: 800000 / 3475226 rows
+2026-11-16 22:07:10,814 INFO ingestion.bronze | bronze copy progress: 1000000 / 3475226 rows
+2026-11-16 22:07:19,001 INFO ingestion.bronze | bronze copy progress: 1200000 / 3475226 rows
+2026-11-16 22:07:28,256 INFO ingestion.bronze | bronze copy progress: 1400000 / 3475226 rows
+2026-11-16 22:07:35,173 INFO ingestion.bronze | bronze copy progress: 1600000 / 3475226 rows
+2026-11-16 22:07:41,531 INFO ingestion.bronze | bronze copy progress: 1800000 / 3475226 rows
+2026-11-16 22:07:49,618 INFO ingestion.bronze | bronze copy progress: 2000000 / 3475226 rows
+2026-11-16 22:07:58,062 INFO ingestion.bronze | bronze copy progress: 2200000 / 3475226 rows
+2026-11-16 22:08:08,643 INFO ingestion.bronze | bronze copy progress: 2400000 / 3475226 rows
+2026-11-16 22:08:19,282 INFO ingestion.bronze | bronze copy progress: 2600000 / 3475226 rows
+2026-11-16 22:08:27,949 INFO ingestion.bronze | bronze copy progress: 2800000 / 3475226 rows
+2026-11-16 22:08:35,167 INFO ingestion.bronze | bronze copy progress: 3000000 / 3475226 rows
+2026-11-16 22:08:42,137 INFO ingestion.bronze | bronze copy progress: 3200000 / 3475226 rows
+2026-11-16 22:08:51,950 INFO ingestion.bronze | bronze copy progress: 3400000 / 3475226 rows
+2026-11-16 22:08:53,533 INFO ingestion.bronze | bronze copy progress: 3475226 / 3475226 rows
+2026-11-16 22:09:17,312 INFO ingestion.pipeline | bronze partition yellow_trips_raw_y2025m01 replaced: 3475226 rows
+2026-11-16 22:09:24,171 INFO __main__ | final status: loaded

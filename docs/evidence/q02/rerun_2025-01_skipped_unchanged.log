@@ -1,0 +1,11 @@
+ Container nyc-taxi-insight-hub-rustfs-1 Running 
+ Container nyc-taxi-insight-hub-postgres-1 Running 
+ Container nyc-taxi-insight-hub-postgres-1 Waiting 
+ Container nyc-taxi-insight-hub-rustfs-1 Waiting 
+ Container nyc-taxi-insight-hub-rustfs-1 Healthy 
+ Container nyc-taxi-insight-hub-postgres-1 Healthy 
+ Container nyc-taxi-insight-hub-ingestion-run-371263f87306 Creating 
+ Container nyc-taxi-insight-hub-ingestion-run-371263f87306 Created 
+2026-11-16 21:20:58,021 INFO ingestion.pipeline | batch 0d9925dc-ae0f-4d40-88b3-95e8538ed358 started: month=2025-01 force=False url=https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2025-01.parquet
+2026-11-16 21:21:02,703 INFO ingestion.pipeline | source unchanged (ETag 3f99a46606c0c7e76a386f81167d8e15-12): nothing to do
+2026-11-16 21:21:02,887 INFO __main__ | final status: skipped_unchanged

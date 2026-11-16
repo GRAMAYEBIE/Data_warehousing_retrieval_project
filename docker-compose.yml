@@ -1,0 +1,95 @@
+name: nyc-taxi-insight-hub
+
+# Profiles: core (warehouse + landing zone), tools (one-shot jobs such as ingestion).
+# Later waves add: bi, ai, obs, stream, ml.
+
+services:
+  postgres:
+    image: postgres:16.6
+    profiles: [core]
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      LOADER_PASSWORD: ${LOADER_PASSWORD}
+      TRANSFORMER_PASSWORD: ${TRANSFORMER_PASSWORD}
+      PUBLISHER_PASSWORD: ${PUBLISHER_PASSWORD}
+      SUPERSET_READER_PASSWORD: ${SUPERSET_READER_PASSWORD}
+      AI_READER_PASSWORD: ${AI_READER_PASSWORD}
+      AI_AUDIT_WRITER_PASSWORD: ${AI_AUDIT_WRITER_PASSWORD}
+      AIRFLOW_DB_PASSWORD: ${AIRFLOW_DB_PASSWORD}
+      SUPERSET_DB_PASSWORD: ${SUPERSET_DB_PASSWORD}
+    command:
+      - postgres
+      - -c
+      - shared_preload_libraries=pg_stat_statements
+      - -c
+      - shared_buffers=512MB
+      - -c
+      - work_mem=32MB
+      - -c
+      - maintenance_work_mem=256MB
+      - -c
+      - max_wal_size=4GB
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      # -h localhost: the temporary server used while init scripts run listens on the
+      # unix socket only, so the service is not reported healthy before init is finished.
+      test: ["CMD-SHELL", "pg_isready -h localhost -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    # Let PostgreSQL finish its shutdown checkpoint after large loads; the default
+    # 10 s leads to a kill and a long crash recovery on the next start.
+    stop_grace_period: 2m
+    restart: unless-stopped
+
+  rustfs:
+    image: rustfs/rustfs:1.0.6
+    profiles: [core]
+    environment:
+      RUSTFS_ACCESS_KEY: ${S3_ACCESS_KEY}
+      RUSTFS_SECRET_KEY: ${S3_SECRET_KEY}
+      RUSTFS_CONSOLE_ENABLE: "true"
+    ports:
+      - "${S3_API_PORT:-9000}:9000"
+      - "${S3_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - rustfs_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    restart: unless-stopped
+
+  ingestion:
+    build: ./ingestion
+    profiles: [tools]
+    environment:
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGDATABASE: ${POSTGRES_DB}
+      PGUSER: loader
+      PGPASSWORD: ${LOADER_PASSWORD}
+      S3_ENDPOINT_URL: http://rustfs:9000
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+      S3_SECRET_KEY: ${S3_SECRET_KEY}
+      S3_BUCKET: ${S3_BUCKET}
+      TLC_BASE_URL: ${TLC_BASE_URL}
+      INGEST_BATCH_ROWS: ${INGEST_BATCH_ROWS:-200000}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rustfs:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  rustfs_data:

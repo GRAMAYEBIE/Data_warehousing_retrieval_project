@@ -1,0 +1,35 @@
+# Secrets
+.env
+*.pem
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# dbt
+dbt/target/
+dbt/dbt_packages/
+dbt/logs/
+
+# Node
+node_modules/
+dist/
+
+# Airflow
+airflow/logs/
+
+# Data (only data/sample is versioned)
+data/*
+!data/sample/
+*.parquet
+!data/sample/*.parquet
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
