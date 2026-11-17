@@ -1,5 +1,7 @@
 -- The data-quality flag catalogue as a table, generated from macros/quality_flags.sql.
--- Read by the trip-quality dimension, the data dictionary and Dashboard 5.
+-- Read by the trip-quality dimension, the data dictionary and Dashboard 5. Stored in gold
+-- (reference data for decisions) so the publication step can expose it to end users.
+{{ config(schema="gold") }}
 {% for flag in quality_flag_catalog() %}
 select
     {{ loop.index }} as flag_order,

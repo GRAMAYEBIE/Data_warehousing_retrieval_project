@@ -1,48 +1,6 @@
 version: 2
 
 models:
-  - name: int_trips_flagged
-    description: >
-      Silver trips (table silver.trips). One row per bronze row that could be parsed,
-      with typed fields, derived duration and speed, one boolean per quality flag, the
-      list of raised flags and the quality status. Rows are never deleted or corrected:
-      approved metrics use quality_status = 'valid' only.
-    data_tests:
-      - dbt_utils.unique_combination_of_columns:
-          arguments:
-            combination_of_columns: [source_month, file_row_number]
-    columns:
-      - name: source_month
-        description: First day of the month of the source file.
-        data_tests: [not_null]
-      - name: file_row_number
-        description: 0-based position of the row in the source Parquet file.
-        data_tests: [not_null]
-      - name: batch_id
-        description: Ingestion batch that loaded the row.
-        data_tests: [not_null]
-      - name: pickup_month
-        description: Month of the pickup. Differs from source_month for cross_month rows.
-      - name: duration_min
-        description: Minutes between pickup and dropoff.
-      - name: speed_mph
-        description: Average speed implied by distance and duration; NULL when duration is zero.
-      - name: components_amount
-        description: >
-          Sum of fare, extra, MTA tax, tip, tolls and surcharges/fees. Vendors do not fill
-          the components the same way, so it is informative only: total_amount is the
-          governed revenue measure.
-      - name: quality_flags
-        description: Codes of the raised quality flags (see quality_flag_catalog).
-        data_tests: [not_null]
-      - name: quality_status
-        description: valid, suspicious or invalid, from the highest severity among raised flags.
-        data_tests:
-          - not_null
-          - accepted_values:
-              arguments:
-                values: [valid, suspicious, invalid]
-
   - name: int_trips_quarantine
     description: >
       Rows whose bronze values cannot be cast to the silver types (table

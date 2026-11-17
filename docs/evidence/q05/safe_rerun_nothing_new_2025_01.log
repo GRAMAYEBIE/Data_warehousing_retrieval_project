@@ -1,0 +1,63 @@
+﻿
+===== rerun_2025_01_nothing_new / resolve_run / attempt=1.log =====
+2026-11-17 11:25:04 [info] Trying to parse the dbt project `dbt` using a dbt manifest...
+2026-11-17 11:25:17 [error] Process timed out, PID: 1337
+2026-11-17 11:25:17 [error] Failed to import: /opt/airflow/dags/monthly_yellow_pipeline.py
+    AirflowTaskTimeout: DagBag import timeout for /opt/airflow/dags/monthly_yellow_pipeline.py after 30.0s.
+Please take a look at these docs to improve your DAG import time:
+* https://airflow.apache.org/docs/apache-airflow/3.3.1/best-practices.html#top-level-python-code
+* https://airflow.apache.org/docs/apache-airflow/3.3.1/best-practices.html#reducing-dag-complexity, PID: 1337
+      <frozen importlib._bootstrap_external>:1152 in get_code
+      <frozen importlib._bootstrap_external>:781 in _compile_bytecode
+      /home/airflow/.local/lib/python3.13/site-packages/airflow/dag_processing/importers/python_importer.py:65 in handle_timeout
+2026-11-17 11:25:17 [error] Error loading DAG from monthly_yellow_pipeline.py: DagBag import timeout for /opt/airflow/dags/monthly_yellow_pipeline.py after 30.0s.
+Please take a look at these docs to improve your DAG import time:
+* https://airflow.apache.org/docs/apache-airflow/3.3.1/best-practices.html#top-level-python-code
+* https://airflow.apache.org/docs/apache-airflow/3.3.1/best-practices.html#reducing-dag-complexity, PID: 1337
+2026-11-17 11:25:17 [error] Dag not found during start up
+2026-11-17 11:25:17 [warning] Rescheduling task during startup, marking task as UP_FOR_RESCHEDULE
+2026-11-17 11:26:21 [info] Trying to parse the dbt project `dbt` using a dbt manifest...
+2026-11-17 11:26:28 [info] Done. Returned value was: {'month': '2025-01', 'source_month': '2025-01-01', 'force': False}
+2026-11-17 11:26:28 [info] Pushing xcom
+
+===== rerun_2025_01_nothing_new / check_source / attempt=1.log =====
+2026-11-17 11:26:31 [info] Trying to parse the dbt project `dbt` using a dbt manifest...
+2026-11-17 11:26:34 [info] Running command: ['/usr/bin/bash', '-c', '/opt/ingestion_venv/bin/python -m ingestion.cli check --month 2025-01']
+2026-11-17 11:26:34 [info] Output:
+2026-11-17 11:26:42 [info] 2026-11-17 11:26:42,122 INFO ingestion.pipeline | source available: https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2025-01.parquet (59158238 bytes, ETag 3f99a46606c0c7e76a386f81167d8e15-12)
+2026-11-17 11:26:42 [info] 2026-11-17 11:26:42,122 INFO __main__ | final status: available
+2026-11-17 11:26:42 [info] Command exited with return code 0
+2026-11-17 11:26:42 [info] Pushing xcom
+
+===== rerun_2025_01_nothing_new / land_to_rustfs / attempt=1.log =====
+2026-11-17 11:26:47 [info] Trying to parse the dbt project `dbt` using a dbt manifest...
+2026-11-17 11:26:55 [info] Running command: ['/usr/bin/bash', '-c', '/opt/ingestion_venv/bin/python -m ingestion.cli land --month 2025-01 ']
+2026-11-17 11:26:55 [info] Output:
+2026-11-17 11:27:02 [info] 2026-11-17 11:27:02,117 INFO ingestion.pipeline | batch 53e80696-8a72-4385-9463-5fefb690c480 started: month=2025-01 force=False url=https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2025-01.parquet
+2026-11-17 11:27:09 [info] 2026-11-17 11:27:09,263 INFO ingestion.pipeline | source unchanged (ETag 3f99a46606c0c7e76a386f81167d8e15-12): nothing to do
+2026-11-17 11:27:10 [info] 2026-11-17 11:27:10,830 INFO __main__ | final status: skipped_unchanged
+2026-11-17 11:27:11 [info] Command exited with return code 0
+2026-11-17 11:27:11 [info] Pushing xcom
+
+===== rerun_2025_01_nothing_new / load_bronze / attempt=1.log =====
+2026-11-17 11:27:20 [info] Trying to parse the dbt project `dbt` using a dbt manifest...
+2026-11-17 11:27:25 [info] Running command: ['/usr/bin/bash', '-c', '/opt/ingestion_venv/bin/python -m ingestion.cli load --month 2025-01']
+2026-11-17 11:27:25 [info] Output:
+2026-11-17 11:27:27 [info] 2026-11-17 11:27:27,779 INFO ingestion.pipeline | batch e50da471-8ad4-4711-9299-6a5caf3b6006 is already in bronze: nothing to load
+2026-11-17 11:27:27 [info] 2026-11-17 11:27:27,781 INFO __main__ | final status: already_loaded
+2026-11-17 11:27:28 [info] Command exited with return code 0
+2026-11-17 11:27:28 [info] Pushing xcom
+
+===== rerun_2025_01_nothing_new / anything_to_publish / attempt=1.log =====
+2026-11-17 11:27:33 [info] Trying to parse the dbt project `dbt` using a dbt manifest...
+2026-11-17 11:27:38 [info] every loaded batch is already published: nothing to build
+2026-11-17 11:27:38 [info] Done. Returned value was: False
+2026-11-17 11:27:38 [info] Condition result is False
+2026-11-17 11:27:38 [info] Skipping downstream tasks
+2026-11-17 11:27:39 [info] Skipping downstream tasks.
+
+===== rerun_2025_01_nothing_new / record_outcome_and_notify / attempt=1.log =====
+2026-11-17 11:27:45 [info] Trying to parse the dbt project `dbt` using a dbt manifest...
+2026-11-17 11:27:50 [info] pipeline outcome: {"run_id": "rerun_2025_01_nothing_new", "source_month": "2025-01-01", "status": "nothing_new", "published": false, "message": "every loaded batch is already published", "signals": []}
+2026-11-17 11:27:50 [info] Done. Returned value was: {'run_id': 'rerun_2025_01_nothing_new', 'source_month': '2025-01-01', 'status': 'nothing_new', 'published': False, 'message': 'every loaded batch is already published', 'signals': []}
+2026-11-17 11:27:50 [info] Pushing xcom

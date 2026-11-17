@@ -46,11 +46,30 @@ def _write_manifest_object(
         log.exception("could not write the manifest object for batch %s", batch_id)
 
 
-def ingest_yellow(settings: Settings, month: date, force: bool = False) -> str:
-    """Ingest one monthly Yellow Taxi file. Returns the final manifest status.
+class NothingToLoad(Exception):
+    """No validated file of this month is in the landing zone."""
 
-    Safe to re-run: an unchanged source file is skipped, a changed or forced one
-    replaces the landing object and the bronze partition.
+
+def check_yellow(settings: Settings, month: date) -> source.SourceInfo:
+    """Check that the monthly file is published. Raises SourceNotAvailable otherwise."""
+    info = source.head(settings.yellow_url(month.year, month.month))
+    log.info("source available: %s (%s bytes, ETag %s)", info.url, info.size, info.etag)
+    return info
+
+
+def ingest_yellow(settings: Settings, month: date, force: bool = False) -> str:
+    """Land then load one monthly file (the command-line path). Returns the final status."""
+    status = land_yellow(settings, month, force)
+    loaded = load_yellow(settings, month)
+    return "skipped_unchanged" if status == "skipped_unchanged" and not loaded else "loaded"
+
+
+def land_yellow(settings: Settings, month: date, force: bool = False) -> str:
+    """Fetch, validate and store one monthly Yellow Taxi file in the landing zone.
+
+    Returns 'landed' or 'skipped_unchanged'. Safe to re-run: an unchanged source file
+    is skipped; a changed or forced one replaces the landing object (same key) and
+    creates a new batch that load_yellow will put in bronze.
     """
     batch_id = uuid4()
     url = settings.yellow_url(month.year, month.month)
@@ -58,7 +77,7 @@ def ingest_yellow(settings: Settings, month: date, force: bool = False) -> str:
     file_name = key.rsplit("/", 1)[-1]
     landing = LandingZone(settings)
 
-    with psycopg.connect(autocommit=True) as meta, psycopg.connect() as data:
+    with psycopg.connect(autocommit=True) as meta:
         manifest.start(meta, batch_id, "yellow", month, url, force)
         log.info(
             "batch %s started: month=%s force=%s url=%s", batch_id, f"{month:%Y-%m}", force, url
@@ -72,8 +91,8 @@ def ingest_yellow(settings: Settings, month: date, force: bool = False) -> str:
                 meta, batch_id, source_etag=info.etag, file_size_bytes=info.size, object_key=key
             )
 
-            # 2. Cheap idempotency check: same ETag and size as the last successful load.
-            previous = manifest.last_loaded(meta, "yellow", month)
+            # 2. Cheap idempotency check: same ETag and size as the last landed file.
+            previous = manifest.latest_batch(meta, "yellow", month)
             if (
                 previous
                 and not force
@@ -152,21 +171,70 @@ def ingest_yellow(settings: Settings, month: date, force: bool = False) -> str:
                 landing.upload_file(local.path, key, local.sha256)
                 manifest.update(meta, batch_id, status="landed")
                 log.info("landed s3://%s/%s", landing.bucket, key)
-
-                # 7. Replace the bronze partition and mark the batch loaded, atomically.
-                with data.transaction():
-                    rows = bronze.replace_month(
-                        data, local.path, month, batch_id, file_name, file_hash, settings.batch_rows
-                    )
-                    manifest.update(data, batch_id, status="loaded", row_count_bronze=rows)
-                log.info(
-                    "bronze partition %s replaced: %s rows", bronze.partition_name(month), rows
-                )
-                return "loaded"
+                return "landed"
         except Exception as exc:
             log.error("batch %s failed: %s", batch_id, exc)
             manifest.update(
                 meta, batch_id, status="failed", error_message=f"{type(exc).__name__}: {exc}"
+            )
+            raise
+        finally:
+            _write_manifest_object(meta, landing, batch_id, month)
+
+
+def load_yellow(settings: Settings, month: date) -> bool:
+    """Load the latest landed file of the month into its bronze partition.
+
+    Reads the file from the landing zone, never from the source, and checks its
+    SHA-256 against the manifest before loading. Returns True when bronze was
+    replaced, False when the latest landed batch is already in bronze.
+    """
+    landing = LandingZone(settings)
+    with psycopg.connect(autocommit=True) as meta, psycopg.connect() as data:
+        batch = manifest.latest_batch(meta, "yellow", month)
+        if batch is None:
+            raise NothingToLoad(f"no landed file for {month:%Y-%m}: run the landing step first")
+        batch_id = batch["batch_id"]
+        if batch["status"] == "loaded":
+            log.info("batch %s is already in bronze: nothing to load", batch_id)
+            return False
+
+        key = batch["object_key"]
+        file_name = key.rsplit("/", 1)[-1]
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                local = Path(tmp) / file_name
+                landing.download_file(key, local)
+                digest = hashlib.sha256()
+                with local.open("rb") as handle:
+                    for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                        digest.update(chunk)
+                if digest.hexdigest() != batch["sha256"]:
+                    raise source.FileValidationError(
+                        f"landed object {key} does not match the manifest checksum"
+                    )
+
+                # Replace the bronze partition and mark the batch loaded, atomically.
+                with data.transaction():
+                    rows = bronze.replace_month(
+                        data,
+                        local,
+                        month,
+                        batch_id,
+                        file_name,
+                        batch["schema_hash"],
+                        settings.batch_rows,
+                    )
+                    manifest.update(data, batch_id, status="loaded", row_count_bronze=rows)
+            log.info("bronze partition %s replaced: %s rows", bronze.partition_name(month), rows)
+            return True
+        except Exception as exc:
+            # The batch stays 'landed': the file is valid and a retry of this step must
+            # pick it up again. The bronze transaction was rolled back, so bronze still
+            # holds the previous batch of the month.
+            log.error("loading batch %s failed: %s", batch_id, exc)
+            manifest.update(
+                meta, batch_id, error_message=f"load failed: {type(exc).__name__}: {exc}"
             )
             raise
         finally:

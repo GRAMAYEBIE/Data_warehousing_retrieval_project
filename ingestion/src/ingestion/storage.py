@@ -45,6 +45,9 @@ class LandingZone:
             str(path), self.bucket, key, ExtraArgs={"Metadata": {"sha256": sha256}}
         )
 
+    def download_file(self, key: str, path: Path) -> None:
+        self._client.download_file(self.bucket, key, str(path))
+
     def put_json(self, key: str, payload: dict) -> None:
         body = json.dumps(payload, default=str, indent=2, sort_keys=True).encode("utf-8")
         self._client.put_object(

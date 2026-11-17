@@ -65,6 +65,29 @@ def last_loaded(
         return cur.fetchone()
 
 
+def latest_batch(
+    conn: psycopg.Connection, dataset: str, source_month: date | None
+) -> dict[str, Any] | None:
+    """Most recent batch of this dataset/month that reached the landing zone.
+
+    Status 'landed' means the file is stored and validated but not yet in bronze;
+    'loaded' means bronze holds it. Attempts that were skipped or failed are ignored.
+    """
+    with conn.cursor(row_factory=dict_row) as cur:
+        cur.execute(
+            """
+            SELECT * FROM ops.ingestion_manifest
+            WHERE dataset = %s
+              AND source_month IS NOT DISTINCT FROM %s
+              AND status IN ('landed', 'loaded')
+            ORDER BY started_at DESC
+            LIMIT 1
+            """,
+            (dataset, source_month),
+        )
+        return cur.fetchone()
+
+
 def get(conn: psycopg.Connection, batch_id: UUID) -> dict[str, Any]:
     with conn.cursor(row_factory=dict_row) as cur:
         cur.execute("SELECT * FROM ops.ingestion_manifest WHERE batch_id = %s", (batch_id,))

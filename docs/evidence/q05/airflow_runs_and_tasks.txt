@@ -1,0 +1,164 @@
+﻿          run_id           |  state  |       started       |        ended        | duration |                 conf                 
+---------------------------+---------+---------------------+---------------------+----------+--------------------------------------
+ first_run_2025_01         | failed  | 2026-11-17 09:00:41 | 2026-11-17 09:14:27 | 00:13:46 | {"force": false, "month": "2025-01"}
+ run_2025_01_attempt2      | success | 2026-11-17 11:12:25 | 2026-11-17 11:18:35 | 00:06:10 | {"force": false, "month": "2025-01"}
+ rerun_2025_01_nothing_new | success | 2026-11-17 11:24:39 | 2026-11-17 11:27:52 | 00:03:13 | {"force": false, "month": "2025-01"}
+ load_2025_02              | running | 2026-11-17 11:30:42 |                     |          | {"force": false, "month": "2025-02"}
+
+          run_id           |                 task_id                  |      state      | tries | seconds 
+---------------------------+------------------------------------------+-----------------+-------+---------
+ first_run_2025_01         | check_source                             | upstream_failed |     0 |       0
+ first_run_2025_01         | land_to_rustfs                           | upstream_failed |     0 |       0
+ first_run_2025_01         | load_bronze                              | upstream_failed |     0 |       0
+ first_run_2025_01         | anything_to_publish                      | upstream_failed |     0 |       0
+ first_run_2025_01         | dbt_build.dim_payment_type.run           | upstream_failed |     0 |       0
+ first_run_2025_01         | dbt_build.dim_rate_code.run              | upstream_failed |     0 |       0
+ first_run_2025_01         | dbt_build.dim_service_period.run         | upstream_failed |     0 |       0
+ first_run_2025_01         | dbt_build.dim_time.run                   | upstream_failed |     0 |       0
+ first_run_2025_01         | dbt_build.dim_vendor.run                 | upstream_failed |     0 |       0
+ first_run_2025_01         | dbt_build.quality_flag_catalog.run       | upstream_failed |     0 |       0
+ first_run_2025_01         | dbt_build.stg_taxi_zones.run             | upstream_failed |     0 |       0
+ first_run_2025_01         | dbt_build.stg_yellow_trips_run           | upstream_failed |     0 |       0
+ first_run_2025_01         | dbt_build.us_ny_holidays.seed            | upstream_failed |     0 |       0
+ first_run_2025_01         | dbt_build.dim_payment_type.test          | upstream_failed |     0 |       0
+ first_run_2025_01         | dbt_build.dim_rate_code.test             | upstream_failed |     0 |       0
+ first_run_2025_01         | dbt_build.dim_service_period.test        | upstream_failed |     0 |       0
+ first_run_2025_01         | dbt_build.dim_time.test                  | upstream_failed |     0 |       0
+ first_run_2025_01         | dbt_build.dim_vendor.test                | upstream_failed |     0 |       0
+ first_run_2025_01         | dbt_build.int_trips_flagged.run          | upstream_failed |     0 |       0
+ first_run_2025_01         | dbt_build.int_trips_quarantine.run       | upstream_failed |     0 |       0
+ first_run_2025_01         | dbt_build.quality_flag_catalog.test      | upstream_failed |     0 |       0
+ first_run_2025_01         | dbt_build.stg_taxi_zones.test            | upstream_failed |     0 |       0
+ first_run_2025_01         | dbt_build.us_ny_holidays.test            | upstream_failed |     0 |       0
+ first_run_2025_01         | dbt_build.dim_date.run                   | upstream_failed |     0 |       0
+ first_run_2025_01         | dbt_build.dim_zone.run                   | upstream_failed |     0 |       0
+ first_run_2025_01         | dbt_build.fct_trip.run                   | upstream_failed |     0 |       0
+ first_run_2025_01         | dbt_build.int_trips_flagged.test         | upstream_failed |     0 |       0
+ first_run_2025_01         | dbt_build.int_trips_quarantine.test      | upstream_failed |     0 |       0
+ first_run_2025_01         | measure_signals                          | upstream_failed |     0 |       0
+ first_run_2025_01         | dbt_build.dim_date.test                  | upstream_failed |     0 |       0
+ first_run_2025_01         | dbt_build.dim_trip_quality.run           | upstream_failed |     0 |       0
+ first_run_2025_01         | dbt_build.dim_zone.test                  | upstream_failed |     0 |       0
+ first_run_2025_01         | dbt_build.fct_trip.test                  | upstream_failed |     0 |       0
+ first_run_2025_01         | dbt_build.recon_bronze_silver.run        | upstream_failed |     0 |       0
+ first_run_2025_01         | quality_gate_and_publish                 | upstream_failed |     0 |       0
+ first_run_2025_01         | dbt_build.agg_quality_daily_run          | upstream_failed |     0 |       0
+ first_run_2025_01         | dbt_build.agg_routes_monthly.run         | upstream_failed |     0 |       0
+ first_run_2025_01         | dbt_build.agg_trips_daily.run            | upstream_failed |     0 |       0
+ first_run_2025_01         | dbt_build.agg_trips_hourly.run           | upstream_failed |     0 |       0
+ first_run_2025_01         | dbt_build.dim_dropoff_zone.run           | upstream_failed |     0 |       0
+ first_run_2025_01         | dbt_build.dim_pickup_zone.run            | upstream_failed |     0 |       0
+ first_run_2025_01         | dbt_build.dim_trip_quality.test          | upstream_failed |     0 |       0
+ first_run_2025_01         | dbt_build.recon_bronze_silver.test       | upstream_failed |     0 |       0
+ first_run_2025_01         | dbt_build.agg_routes_monthly.test        | upstream_failed |     0 |       0
+ first_run_2025_01         | dbt_build.agg_trips_daily.test           | upstream_failed |     0 |       0
+ first_run_2025_01         | dbt_build.agg_trips_hourly.test          | upstream_failed |     0 |       0
+ first_run_2025_01         | dbt_build.dim_dropoff_zone.test          | upstream_failed |     0 |       0
+ first_run_2025_01         | dbt_build.dim_pickup_zone.test           | upstream_failed |     0 |       0
+ first_run_2025_01         | record_outcome_and_notify                | failed          |     2 |      20
+ first_run_2025_01         | resolve_run                              | failed          |     1 |        
+ rerun_2025_01_nothing_new | resolve_run                              | success         |     1 |      10
+ rerun_2025_01_nothing_new | check_source                             | success         |     1 |      13
+ rerun_2025_01_nothing_new | land_to_rustfs                           | success         |     1 |      27
+ rerun_2025_01_nothing_new | load_bronze                              | success         |     1 |      15
+ rerun_2025_01_nothing_new | anything_to_publish                      | success         |     1 |       9
+ rerun_2025_01_nothing_new | dbt_build.bronze_yellow_trips_raw.source | skipped         |     0 |        
+ rerun_2025_01_nothing_new | dbt_build.dim_payment_type.run           | skipped         |     0 |        
+ rerun_2025_01_nothing_new | dbt_build.dim_rate_code.run              | skipped         |     0 |        
+ rerun_2025_01_nothing_new | dbt_build.dim_service_period.run         | skipped         |     0 |        
+ rerun_2025_01_nothing_new | dbt_build.dim_time.run                   | skipped         |     0 |        
+ rerun_2025_01_nothing_new | dbt_build.dim_vendor.run                 | skipped         |     0 |        
+ rerun_2025_01_nothing_new | dbt_build.ops_ingestion_manifest.source  | skipped         |     0 |        
+ rerun_2025_01_nothing_new | dbt_build.quality_flag_catalog.run       | skipped         |     0 |        
+ rerun_2025_01_nothing_new | dbt_build.stg_taxi_zones.run             | skipped         |     0 |        
+ rerun_2025_01_nothing_new | dbt_build.us_ny_holidays.seed            | skipped         |     0 |        
+ rerun_2025_01_nothing_new | dbt_build.bronze_yellow_trips_raw.test   | skipped         |     0 |       0
+ rerun_2025_01_nothing_new | dbt_build.dim_payment_type.test          | skipped         |     0 |       0
+ rerun_2025_01_nothing_new | dbt_build.dim_rate_code.test             | skipped         |     0 |       0
+ rerun_2025_01_nothing_new | dbt_build.dim_service_period.test        | skipped         |     0 |       0
+ rerun_2025_01_nothing_new | dbt_build.dim_time.test                  | skipped         |     0 |       0
+ rerun_2025_01_nothing_new | dbt_build.dim_vendor.test                | skipped         |     0 |       0
+ rerun_2025_01_nothing_new | dbt_build.ops_ingestion_manifest.test    | skipped         |     0 |       0
+ rerun_2025_01_nothing_new | dbt_build.quality_flag_catalog.test      | skipped         |     0 |       0
+ rerun_2025_01_nothing_new | dbt_build.stg_taxi_zones.test            | skipped         |     0 |       0
+ rerun_2025_01_nothing_new | dbt_build.us_ny_holidays.test            | skipped         |     0 |       0
+ rerun_2025_01_nothing_new | dbt_build.dim_date.run                   | skipped         |     0 |       0
+ rerun_2025_01_nothing_new | dbt_build.dim_zone.run                   | skipped         |     0 |       0
+ rerun_2025_01_nothing_new | dbt_build.fct_trip.run                   | skipped         |     0 |       0
+ rerun_2025_01_nothing_new | dbt_build.recon_bronze_silver.run        | skipped         |     0 |       0
+ rerun_2025_01_nothing_new | dbt_build.stg_yellow_trips_run           | skipped         |     0 |       0
+ rerun_2025_01_nothing_new | measure_signals                          | skipped         |     0 |       0
+ rerun_2025_01_nothing_new | dbt_build.dim_date.test                  | skipped         |     0 |       0
+ rerun_2025_01_nothing_new | dbt_build.dim_zone.test                  | skipped         |     0 |       0
+ rerun_2025_01_nothing_new | dbt_build.fct_trip.test                  | skipped         |     0 |       0
+ rerun_2025_01_nothing_new | dbt_build.int_trips_flagged.run          | skipped         |     0 |       0
+ rerun_2025_01_nothing_new | dbt_build.int_trips_quarantine.run       | skipped         |     0 |       0
+ rerun_2025_01_nothing_new | dbt_build.recon_bronze_silver.test       | skipped         |     0 |       0
+ rerun_2025_01_nothing_new | quality_gate_and_publish                 | skipped         |     0 |       0
+ rerun_2025_01_nothing_new | dbt_build.agg_quality_daily_run          | skipped         |     0 |       0
+ rerun_2025_01_nothing_new | dbt_build.agg_routes_monthly.run         | skipped         |     0 |       0
+ rerun_2025_01_nothing_new | dbt_build.agg_trips_daily.run            | skipped         |     0 |       0
+ rerun_2025_01_nothing_new | dbt_build.agg_trips_hourly.run           | skipped         |     0 |       0
+ rerun_2025_01_nothing_new | dbt_build.dim_dropoff_zone.run           | skipped         |     0 |       0
+ rerun_2025_01_nothing_new | dbt_build.dim_pickup_zone.run            | skipped         |     0 |       0
+ rerun_2025_01_nothing_new | dbt_build.int_trips_flagged.test         | skipped         |     0 |       0
+ rerun_2025_01_nothing_new | dbt_build.int_trips_quarantine.test      | skipped         |     0 |       0
+ rerun_2025_01_nothing_new | dbt_build.agg_routes_monthly.test        | skipped         |     0 |       0
+ rerun_2025_01_nothing_new | dbt_build.agg_trips_daily.test           | skipped         |     0 |       0
+ rerun_2025_01_nothing_new | dbt_build.agg_trips_hourly.test          | skipped         |     0 |       0
+ rerun_2025_01_nothing_new | dbt_build.dim_dropoff_zone.test          | skipped         |     0 |       0
+ rerun_2025_01_nothing_new | dbt_build.dim_pickup_zone.test           | skipped         |     0 |       0
+ rerun_2025_01_nothing_new | record_outcome_and_notify                | success         |     1 |       6
+ rerun_2025_01_nothing_new | dbt_build.dim_trip_quality.run           | skipped         |     0 |       0
+ rerun_2025_01_nothing_new | dbt_build.dim_trip_quality.test          | skipped         |     0 |       0
+ run_2025_01_attempt2      | resolve_run                              | success         |     1 |      13
+ run_2025_01_attempt2      | check_source                             | success         |     1 |      43
+ run_2025_01_attempt2      | land_to_rustfs                           | success         |     1 |      26
+ run_2025_01_attempt2      | load_bronze                              | success         |     1 |       6
+ run_2025_01_attempt2      | anything_to_publish                      | success         |     1 |       7
+ run_2025_01_attempt2      | dbt_build.stg_yellow_trips_run           | success         |     1 |      75
+ run_2025_01_attempt2      | dbt_build.stg_taxi_zones.run             | success         |     1 |      75
+ run_2025_01_attempt2      | dbt_build.stg_taxi_zones.test            | success         |     1 |      51
+ run_2025_01_attempt2      | dbt_build.int_trips_flagged.run          | success         |     1 |     203
+ run_2025_01_attempt2      | dbt_build.us_ny_holidays.seed            | success         |     1 |     152
+ run_2025_01_attempt2      | dbt_build.dim_zone.run                   | success         |     1 |      54
+ run_2025_01_attempt2      | dbt_build.dim_payment_type.run           | success         |     1 |      55
+ run_2025_01_attempt2      | dbt_build.dim_rate_code.run              | success         |     1 |      33
+ run_2025_01_attempt2      | dbt_build.dim_vendor.run                 | success         |     1 |      31
+ run_2025_01_attempt2      | dbt_build.dim_service_period.run         | success         |     1 |      59
+ run_2025_01_attempt2      | dbt_build.dim_time.run                   | success         |     1 |      58
+ run_2025_01_attempt2      | dbt_build.quality_flag_catalog.run       | success         |     1 |      27
+ run_2025_01_attempt2      | dbt_build.dim_zone.test                  | success         |     1 |      75
+ run_2025_01_attempt2      | dbt_build.int_trips_flagged.test         | success         |     1 |     780
+ run_2025_01_attempt2      | dbt_build.dim_payment_type.test          | success         |     1 |     149
+ run_2025_01_attempt2      | dbt_build.dim_rate_code.test             | success         |     1 |     258
+ run_2025_01_attempt2      | dbt_build.dim_vendor.test                | success         |     1 |     142
+ run_2025_01_attempt2      | dbt_build.dim_dropoff_zone.run           | success         |     1 |      42
+ run_2025_01_attempt2      | dbt_build.dim_service_period.test        | success         |     1 |     119
+ run_2025_01_attempt2      | dbt_build.quality_flag_catalog.test      | success         |     1 |      46
+ run_2025_01_attempt2      | dbt_build.us_ny_holidays.test            | success         |     2 |      49
+ run_2025_01_attempt2      | dbt_build.int_trips_quarantine.run       | success         |     1 |     145
+ run_2025_01_attempt2      | dbt_build.dim_trip_quality.run           | success         |     1 |     295
+ run_2025_01_attempt2      | dbt_build.int_trips_quarantine.test      | success         |     1 |     272
+ run_2025_01_attempt2      | dbt_build.dim_date.run                   | success         |     1 |      74
+ run_2025_01_attempt2      | dbt_build.dim_pickup_zone.run            | success         |     1 |      53
+ run_2025_01_attempt2      | dbt_build.dim_dropoff_zone.test          | success         |     1 |     177
+ run_2025_01_attempt2      | dbt_build.dim_time.test                  | success         |     1 |     171
+ run_2025_01_attempt2      | dbt_build.dim_trip_quality.test          | success         |     1 |     247
+ run_2025_01_attempt2      | dbt_build.dim_date.test                  | success         |     1 |     247
+ run_2025_01_attempt2      | dbt_build.fct_trip.run                   | success         |     1 |     377
+ run_2025_01_attempt2      | dbt_build.recon_bronze_silver.run        | success         |     1 |     420
+ run_2025_01_attempt2      | dbt_build.dim_pickup_zone.test           | success         |     1 |      95
+ run_2025_01_attempt2      | dbt_build.recon_bronze_silver.test       | success         |     1 |      58
+ run_2025_01_attempt2      | dbt_build.fct_trip.test                  | success         |     1 |     748
+ run_2025_01_attempt2      | dbt_build.agg_routes_monthly.run         | success         |     1 |     348
+ run_2025_01_attempt2      | dbt_build.agg_quality_daily_run          | success         |     1 |     341
+ run_2025_01_attempt2      | dbt_build.agg_trips_daily.run            | success         |     1 |     237
+ run_2025_01_attempt2      | dbt_build.agg_trips_hourly.run           | success         |     1 |     228
+ run_2025_01_attempt2      | dbt_build.agg_trips_daily.test           | success         |     1 |      57
+ run_2025_01_attempt2      | dbt_build.agg_trips_hourly.test          | success         |     1 |      61
+ run_2025_01_attempt2      | dbt_build.agg_routes_monthly.test        | success         |     1 |      39
+ run_2025_01_attempt2      | measure_signals                          | success         |     3 |      25
+ run_2025_01_attempt2      | quality_gate_and_publish                 | success         |     2 |      47
+ run_2025_01_attempt2      | record_outcome_and_notify                | success         |     2 |       9
+

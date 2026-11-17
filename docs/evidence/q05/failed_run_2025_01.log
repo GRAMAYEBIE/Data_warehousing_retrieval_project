@@ -1,0 +1,36 @@
+﻿
+===== first_run_2025_01 / resolve_run / attempt=1.log =====
+
+===== first_run_2025_01 / record_outcome_and_notify / attempt=1.log =====
+2026-11-17 09:01:45 [info] Trying to parse the dbt project `dbt` using a dbt manifest...
+2026-11-17 09:01:53 [error] pipeline outcome: {"run_id": "first_run_2025_01", "source_month": null, "status": "failed", "published": false, "message": null, "signals": []}
+2026-11-17 09:01:53 [error] Task failed with exception
+    RuntimeError: pipeline run failed: see task logs
+      /home/airflow/.local/lib/python3.13/site-packages/airflow/providers/standard/operators/python.py:254 in execute_callable
+      /home/airflow/.local/lib/python3.13/site-packages/airflow/sdk/execution_time/callback_runner.py:97 in run
+      /opt/airflow/dags/monthly_yellow_pipeline.py:144 in finish
+
+===== first_run_2025_01 / record_outcome_and_notify / attempt=2.log =====
+2026-11-17 09:12:48 [info] Trying to parse the dbt project `dbt` using a dbt manifest...
+2026-11-17 09:13:04 [error] Process timed out, PID: 44
+2026-11-17 09:13:04 [error] Failed to import: /opt/airflow/dags/monthly_yellow_pipeline.py
+    AirflowTaskTimeout: DagBag import timeout for /opt/airflow/dags/monthly_yellow_pipeline.py after 30.0s.
+Please take a look at these docs to improve your DAG import time:
+* https://airflow.apache.org/docs/apache-airflow/3.3.1/best-practices.html#top-level-python-code
+* https://airflow.apache.org/docs/apache-airflow/3.3.1/best-practices.html#reducing-dag-complexity, PID: 44
+      /home/airflow/.local/lib/python3.13/site-packages/aiohttp/client_middlewares.py:5 in <module>
+      /home/airflow/.local/lib/python3.13/site-packages/aiohttp/client_reqrep.py:20 in <module>
+      /home/airflow/.local/lib/python3.13/site-packages/airflow/dag_processing/importers/python_importer.py:65 in handle_timeout
+2026-11-17 09:13:04 [error] Error loading DAG from monthly_yellow_pipeline.py: DagBag import timeout for /opt/airflow/dags/monthly_yellow_pipeline.py after 30.0s.
+Please take a look at these docs to improve your DAG import time:
+* https://airflow.apache.org/docs/apache-airflow/3.3.1/best-practices.html#top-level-python-code
+* https://airflow.apache.org/docs/apache-airflow/3.3.1/best-practices.html#reducing-dag-complexity, PID: 44
+2026-11-17 09:13:04 [error] Dag not found during start up
+2026-11-17 09:13:04 [warning] Rescheduling task during startup, marking task as UP_FOR_RESCHEDULE
+2026-11-17 09:14:07 [info] Trying to parse the dbt project `dbt` using a dbt manifest...
+2026-11-17 09:14:25 [error] pipeline outcome: {"run_id": "first_run_2025_01", "source_month": null, "status": "failed", "published": false, "message": null, "signals": []}
+2026-11-17 09:14:25 [error] Task failed with exception
+    RuntimeError: pipeline run failed: see task logs
+      /home/airflow/.local/lib/python3.13/site-packages/airflow/providers/standard/operators/python.py:254 in execute_callable
+      /home/airflow/.local/lib/python3.13/site-packages/airflow/sdk/execution_time/callback_runner.py:97 in run
+      /opt/airflow/dags/monthly_yellow_pipeline.py:144 in finish

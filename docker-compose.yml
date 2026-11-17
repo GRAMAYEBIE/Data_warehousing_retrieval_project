@@ -1,7 +1,64 @@
 name: nyc-taxi-insight-hub
 
-# Profiles: core (warehouse + landing zone), tools (one-shot jobs such as ingestion).
+# Profiles: core (warehouse + landing zone), orchestration (Airflow), tools (one-shot jobs).
 # Later waves add: bi, ai, obs, stream, ml.
+
+x-airflow-common: &airflow-common
+  image: nyc-taxi-airflow:local
+  build:
+    context: .
+    dockerfile: airflow/Dockerfile
+  environment: &airflow-env
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:${AIRFLOW_DB_PASSWORD}@postgres:5432/airflow_meta
+    AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY}
+    AIRFLOW__API__SECRET_KEY: ${AIRFLOW_API_SECRET_KEY}
+    AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET}
+    AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-apiserver:8080/execution/
+    AIRFLOW__CORE__LOAD_EXAMPLES: "False"
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "True"
+    AIRFLOW__CORE__PARALLELISM: "4"
+    # Small machine: give task workers time to reach the API server under load (default
+    # 5 s), and re-parse the Cosmos DAG every 5 minutes instead of every 30 seconds.
+    AIRFLOW__WORKERS__EXECUTION_API_TIMEOUT: "60"
+    AIRFLOW__DAG_PROCESSOR__MIN_FILE_PROCESS_INTERVAL: "300"
+    AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_USERS: admin:admin
+    AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE: /opt/airflow/simple_auth_passwords.json
+    AIRFLOW_ADMIN_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD}
+    # Warehouse connection used by the pipeline tasks (role publisher).
+    AIRFLOW_CONN_WAREHOUSE_PUBLISHER: postgresql://publisher:${PUBLISHER_PASSWORD}@postgres:5432/${POSTGRES_DB}
+    # dbt runs as transformer (dbt/profiles.yml reads these variables).
+    DBT_PROJECT_DIR: /opt/airflow/dbt
+    DBT_HOST: postgres
+    DBT_PORT: "5432"
+    DBT_DATABASE: ${POSTGRES_DB}
+    DBT_USER: transformer
+    DBT_PASSWORD: ${TRANSFORMER_PASSWORD}
+    DBT_THREADS: "1"
+    # Ingestion runs as loader.
+    INGEST_PGHOST: postgres
+    INGEST_PGPORT: "5432"
+    INGEST_PGDATABASE: ${POSTGRES_DB}
+    INGEST_PGUSER: loader
+    INGEST_PGPASSWORD: ${LOADER_PASSWORD}
+    S3_ENDPOINT_URL: http://rustfs:9000
+    S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+    S3_SECRET_KEY: ${S3_SECRET_KEY}
+    S3_BUCKET: ${S3_BUCKET}
+    TLC_BASE_URL: ${TLC_BASE_URL}
+    INGEST_BATCH_ROWS: ${INGEST_BATCH_ROWS:-200000}
+    NOTIFY_WEBHOOK_URL: ${NOTIFY_WEBHOOK_URL:-}
+    PIPELINE_SCHEDULE: ${PIPELINE_SCHEDULE:-}
+  volumes:
+    - ./airflow/dags:/opt/airflow/dags
+    - ./airflow/include:/opt/airflow/include
+    - ./dbt:/opt/airflow/dbt
+    - airflow_logs:/opt/airflow/logs
+  depends_on: &airflow-depends
+    postgres:
+      condition: service_healthy
+    rustfs:
+      condition: service_healthy
 
 services:
   postgres:
@@ -93,6 +150,8 @@ services:
   dbt:
     build: ./dbt
     profiles: [tools]
+    # Same user as Airflow: both write dbt/target and dbt/logs in the shared project folder.
+    user: "50000:0"
     environment:
       DBT_HOST: postgres
       DBT_PORT: "5432"
@@ -106,6 +165,82 @@ services:
       postgres:
         condition: service_healthy
 
+  # One-shot: migrate the Airflow database, set the admin password, build the dbt manifest
+  # that Cosmos reads to render one Airflow task per dbt model.
+  airflow-init:
+    <<: *airflow-common
+    profiles: [orchestration]
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        set -e
+        airflow db migrate
+        cd /opt/airflow/dbt
+        /opt/dbt_venv/bin/dbt deps --quiet
+        /opt/dbt_venv/bin/dbt parse --quiet
+        echo "airflow-init done"
+    restart: "no"
+
+  airflow-apiserver:
+    <<: *airflow-common
+    profiles: [orchestration]
+    # The admin password comes from .env; it is written where the auth manager reads it.
+    command:
+      - bash
+      - -c
+      - |
+        python -c "import json, os; json.dump({'admin': os.environ['AIRFLOW_ADMIN_PASSWORD']}, open(os.environ['AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE'], 'w'))"
+        exec airflow api-server
+    ports:
+      - "${AIRFLOW_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/api/v2/monitor/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+    restart: unless-stopped
+    depends_on:
+      <<: *airflow-depends
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-scheduler:
+    <<: *airflow-common
+    profiles: [orchestration]
+    command: scheduler
+    healthcheck:
+      test: ["CMD-SHELL", "airflow jobs check --job-type SchedulerJob --local || exit 1"]
+      interval: 60s
+      timeout: 30s
+      retries: 5
+      start_period: 60s
+    restart: unless-stopped
+    depends_on:
+      <<: *airflow-depends
+      airflow-init:
+        condition: service_completed_successfully
+      airflow-apiserver:
+        condition: service_healthy
+
+  airflow-dag-processor:
+    <<: *airflow-common
+    profiles: [orchestration]
+    command: dag-processor
+    healthcheck:
+      test: ["CMD-SHELL", "airflow jobs check --job-type DagProcessorJob --local || exit 1"]
+      interval: 60s
+      timeout: 30s
+      retries: 5
+      start_period: 60s
+    restart: unless-stopped
+    depends_on:
+      <<: *airflow-depends
+      airflow-init:
+        condition: service_completed_successfully
+
 volumes:
+  airflow_logs:
   postgres_data:
   rustfs_data:

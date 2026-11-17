@@ -1,0 +1,95 @@
+﻿
+===== run_2025_01_attempt2 / resolve_run / attempt=1.log =====
+2026-11-17 09:14:59 [info] Trying to parse the dbt project `dbt` using a dbt manifest...
+2026-11-17 09:15:10 [info] Done. Returned value was: {'month': '2025-01', 'source_month': '2025-01-01', 'force': False}
+2026-11-17 09:15:10 [info] Pushing xcom
+
+===== run_2025_01_attempt2 / check_source / attempt=1.log =====
+2026-11-17 09:15:17 [info] Trying to parse the dbt project `dbt` using a dbt manifest...
+2026-11-17 09:15:32 [info] Running command: ['/usr/bin/bash', '-c', '/opt/ingestion_venv/bin/python -m ingestion.cli check --month 2025-01']
+2026-11-17 09:15:32 [info] Output:
+2026-11-17 09:15:55 [info] 2026-11-17 09:15:55,542 INFO ingestion.pipeline | source available: https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2025-01.parquet (59158238 bytes, ETag 3f99a46606c0c7e76a386f81167d8e15-12)
+2026-11-17 09:15:55 [info] 2026-11-17 09:15:55,543 INFO __main__ | final status: available
+2026-11-17 09:15:57 [info] Command exited with return code 0
+2026-11-17 09:15:57 [info] Pushing xcom
+
+===== run_2025_01_attempt2 / land_to_rustfs / attempt=1.log =====
+2026-11-17 09:16:08 [info] Trying to parse the dbt project `dbt` using a dbt manifest...
+2026-11-17 09:16:17 [info] Running command: ['/usr/bin/bash', '-c', '/opt/ingestion_venv/bin/python -m ingestion.cli land --month 2025-01 ']
+2026-11-17 09:16:17 [info] Output:
+2026-11-17 09:16:22 [info] 2026-11-17 09:16:22,611 INFO ingestion.pipeline | batch 1e9fb9eb-5796-40dd-9438-a977f11557a3 started: month=2025-01 force=False url=https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2025-01.parquet
+2026-11-17 09:16:23 [info] 2026-11-17 09:16:23,674 INFO ingestion.pipeline | source unchanged (ETag 3f99a46606c0c7e76a386f81167d8e15-12): nothing to do
+2026-11-17 09:16:23 [info] 2026-11-17 09:16:23,908 INFO __main__ | final status: skipped_unchanged
+2026-11-17 09:16:24 [info] Command exited with return code 0
+2026-11-17 09:16:24 [info] Pushing xcom
+
+===== run_2025_01_attempt2 / load_bronze / attempt=1.log =====
+2026-11-17 09:16:26 [info] Trying to parse the dbt project `dbt` using a dbt manifest...
+2026-11-17 09:16:29 [info] Running command: ['/usr/bin/bash', '-c', '/opt/ingestion_venv/bin/python -m ingestion.cli load --month 2025-01']
+2026-11-17 09:16:29 [info] Output:
+2026-11-17 09:16:31 [info] 2026-11-17 09:16:31,068 INFO ingestion.pipeline | batch e50da471-8ad4-4711-9299-6a5caf3b6006 is already in bronze: nothing to load
+2026-11-17 09:16:31 [info] 2026-11-17 09:16:31,070 INFO __main__ | final status: already_loaded
+2026-11-17 09:16:31 [info] Command exited with return code 0
+2026-11-17 09:16:31 [info] Pushing xcom
+
+===== run_2025_01_attempt2 / anything_to_publish / attempt=1.log =====
+2026-11-17 09:16:34 [info] Trying to parse the dbt project `dbt` using a dbt manifest...
+2026-11-17 09:16:38 [info] new or changed batches to build and publish: ['2024-12-01', '2025-01-01']
+2026-11-17 09:16:38 [info] Done. Returned value was: True
+2026-11-17 09:16:38 [info] Condition result is True
+2026-11-17 09:16:38 [info] Proceeding with downstream tasks...
+2026-11-17 09:16:38 [info] Pushing xcom
+
+===== run_2025_01_attempt2 / measure_signals / attempt=1.log =====
+2026-11-17 10:46:15 [info] Trying to parse the dbt project `dbt` using a dbt manifest...
+2026-11-17 10:46:17 [error] Task failed with exception
+    TypeError: can't subtract offset-naive and offset-aware datetimes
+      /opt/airflow/dags/monthly_yellow_pipeline.py:113 in measure_signals
+      /opt/airflow/include/nyc_taxi_ops/signals.py:179 in measure
+      /opt/airflow/include/nyc_taxi_ops/signals.py:113 in freshness_signal
+
+===== run_2025_01_attempt2 / measure_signals / attempt=2.log =====
+2026-11-17 11:10:09 [info] Trying to parse the dbt project `dbt` using a dbt manifest...
+2026-11-17 11:10:18 [info] signal freshness_days                 ok       0.54 days (warn > 45 days since the last successful load)
+2026-11-17 11:10:18 [info] signal volume_change_vs_prior_month   ok       -5.27 % (|change| warn > 20.0%, fail > 50.0%)
+2026-11-17 11:10:18 [info] signal rejected_row_rate              ok       8.56 % (warn > 10.0%, fail > 20.0%)
+2026-11-17 11:10:18 [info] signal late_data_rate                 ok       0.0006 % (warn > 0.1%)
+2026-11-17 11:10:18 [info] signal dbt_test_pass_rate             ok       100.0 % (fail < 100%)
+2026-11-17 11:10:18 [info] Done. Returned value was: [{'name': 'freshness_days', 'status': 'ok', 'value': 0.54}, {'name': 'volume_change_vs_prior_month', 'status': 'ok', 'value': -5.27}, {'name': 'rejected_row_rate', 'status': 'ok', 'value': 8.56}, {'name': 'late_data_rate', 'status': 'ok', 'value': 0.0006}, {'name': 'dbt_test_pass_rate', 'status': 'ok', 'value': 100.0}]
+2026-11-17 11:10:18 [info] Pushing xcom
+
+===== run_2025_01_attempt2 / measure_signals / attempt=3.log =====
+2026-11-17 11:12:34 [info] Trying to parse the dbt project `dbt` using a dbt manifest...
+2026-11-17 11:12:52 [info] signal freshness_days                 ok       0.54 days (warn > 45 days since the last successful load)
+2026-11-17 11:12:52 [info] signal volume_change_vs_prior_month   ok       -5.27 % (|change| warn > 20.0%, fail > 50.0%)
+2026-11-17 11:12:52 [info] signal rejected_row_rate              ok       8.56 % (warn > 10.0%, fail > 20.0%)
+2026-11-17 11:12:52 [info] signal late_data_rate                 ok       0.0006 % (warn > 0.1%)
+2026-11-17 11:12:52 [info] signal dbt_test_pass_rate             ok       100.0 % (fail < 100%)
+2026-11-17 11:12:52 [info] Done. Returned value was: [{'name': 'freshness_days', 'status': 'ok', 'value': 0.54}, {'name': 'volume_change_vs_prior_month', 'status': 'ok', 'value': -5.27}, {'name': 'rejected_row_rate', 'status': 'ok', 'value': 8.56}, {'name': 'late_data_rate', 'status': 'ok', 'value': 0.0006}, {'name': 'dbt_test_pass_rate', 'status': 'ok', 'value': 100.0}]
+2026-11-17 11:12:52 [info] Pushing xcom
+
+===== run_2025_01_attempt2 / quality_gate_and_publish / attempt=1.log =====
+2026-11-17 11:10:21 [info] Trying to parse the dbt project `dbt` using a dbt manifest...
+2026-11-17 11:10:25 [info] quality gate open for run run_2025_01_attempt2
+2026-11-17 11:11:22 [info] published 14 tables for run run_2025_01_attempt2: {'agg_trips_daily': 179492, 'agg_trips_hourly': 383826, 'agg_routes_monthly': 110618, 'agg_quality_daily': 76243, 'recon_bronze_silver': 2, 'dim_date': 458, 'dim_time': 1441, 'dim_zone': 266, 'dim_payment_type': 8, 'dim_rate_code': 8, 'dim_vendor': 5, 'dim_service_period': 5, 'dim_trip_quality': 103, 'quality_flag_catalog': 14}
+2026-11-17 11:11:22 [info] Done. Returned value was: {'tables': {'agg_trips_daily': 179492, 'agg_trips_hourly': 383826, 'agg_routes_monthly': 110618, 'agg_quality_daily': 76243, 'recon_bronze_silver': 2, 'dim_date': 458, 'dim_time': 1441, 'dim_zone': 266, 'dim_payment_type': 8, 'dim_rate_code': 8, 'dim_vendor': 5, 'dim_service_period': 5, 'dim_trip_quality': 103, 'quality_flag_catalog': 14}, 'batches': {'2024-12-01': '1e8b4c88-fbed-4911-bc74-d1043aea92d7', '2025-01-01': 'e50da471-8ad4-4711-9299-6a5caf3b6006'}}
+2026-11-17 11:11:22 [info] Pushing xcom
+
+===== run_2025_01_attempt2 / quality_gate_and_publish / attempt=2.log =====
+2026-11-17 11:17:40 [info] Trying to parse the dbt project `dbt` using a dbt manifest...
+2026-11-17 11:17:47 [info] quality gate open for run run_2025_01_attempt2
+2026-11-17 11:18:24 [info] published 14 tables for run run_2025_01_attempt2: {'agg_trips_daily': 179492, 'agg_trips_hourly': 383826, 'agg_routes_monthly': 110618, 'agg_quality_daily': 76243, 'recon_bronze_silver': 2, 'dim_date': 458, 'dim_time': 1441, 'dim_zone': 266, 'dim_payment_type': 8, 'dim_rate_code': 8, 'dim_vendor': 5, 'dim_service_period': 5, 'dim_trip_quality': 103, 'quality_flag_catalog': 14}
+2026-11-17 11:18:24 [info] Done. Returned value was: {'tables': {'agg_trips_daily': 179492, 'agg_trips_hourly': 383826, 'agg_routes_monthly': 110618, 'agg_quality_daily': 76243, 'recon_bronze_silver': 2, 'dim_date': 458, 'dim_time': 1441, 'dim_zone': 266, 'dim_payment_type': 8, 'dim_rate_code': 8, 'dim_vendor': 5, 'dim_service_period': 5, 'dim_trip_quality': 103, 'quality_flag_catalog': 14}, 'batches': {'2024-12-01': '1e8b4c88-fbed-4911-bc74-d1043aea92d7', '2025-01-01': 'e50da471-8ad4-4711-9299-6a5caf3b6006'}}
+2026-11-17 11:18:24 [info] Pushing xcom
+
+===== run_2025_01_attempt2 / record_outcome_and_notify / attempt=1.log =====
+2026-11-17 11:11:27 [info] Trying to parse the dbt project `dbt` using a dbt manifest...
+2026-11-17 11:11:32 [info] pipeline outcome: {"run_id": "run_2025_01_attempt2", "source_month": "2025-01-01", "status": "published", "published": true, "message": null, "signals": [{"name": "dbt_test_pass_rate", "status": "ok", "value": 100.0, "unit": "%"}, {"name": "freshness_days", "status": "ok", "value": 0.54, "unit": "days"}, {"name": "late_data_rate", "status": "ok", "value": 0.0006, "unit": "%"}, {"name": "rejected_row_rate", "status": "ok", "value": 8.56, "unit": "%"}, {"name": "volume_change_vs_prior_month", "status": "ok", "value": -5.27, "unit": "%"}]}
+2026-11-17 11:11:32 [info] Done. Returned value was: {'run_id': 'run_2025_01_attempt2', 'source_month': '2025-01-01', 'status': 'published', 'published': True, 'message': None, 'signals': [{'name': 'dbt_test_pass_rate', 'status': 'ok', 'value': 100.0, 'unit': '%'}, {'name': 'freshness_days', 'status': 'ok', 'value': 0.54, 'unit': 'days'}, {'name': 'late_data_rate', 'status': 'ok', 'value': 0.0006, 'unit': '%'}, {'name': 'rejected_row_rate', 'status': 'ok', 'value': 8.56, 'unit': '%'}, {'name': 'volume_change_vs_prior_month', 'status': 'ok', 'value': -5.27, 'unit': '%'}]}
+2026-11-17 11:11:32 [info] Pushing xcom
+
+===== run_2025_01_attempt2 / record_outcome_and_notify / attempt=2.log =====
+2026-11-17 11:18:30 [info] Trying to parse the dbt project `dbt` using a dbt manifest...
+2026-11-17 11:18:34 [info] pipeline outcome: {"run_id": "run_2025_01_attempt2", "source_month": "2025-01-01", "status": "published", "published": true, "message": null, "signals": [{"name": "dbt_test_pass_rate", "status": "ok", "value": 100.0, "unit": "%"}, {"name": "freshness_days", "status": "ok", "value": 0.54, "unit": "days"}, {"name": "late_data_rate", "status": "ok", "value": 0.0006, "unit": "%"}, {"name": "rejected_row_rate", "status": "ok", "value": 8.56, "unit": "%"}, {"name": "volume_change_vs_prior_month", "status": "ok", "value": -5.27, "unit": "%"}]}
+2026-11-17 11:18:34 [info] Done. Returned value was: {'run_id': 'run_2025_01_attempt2', 'source_month': '2025-01-01', 'status': 'published', 'published': True, 'message': None, 'signals': [{'name': 'dbt_test_pass_rate', 'status': 'ok', 'value': 100.0, 'unit': '%'}, {'name': 'freshness_days', 'status': 'ok', 'value': 0.54, 'unit': 'days'}, {'name': 'late_data_rate', 'status': 'ok', 'value': 0.0006, 'unit': '%'}, {'name': 'rejected_row_rate', 'status': 'ok', 'value': 8.56, 'unit': '%'}, {'name': 'volume_change_vs_prior_month', 'status': 'ok', 'value': -5.27, 'unit': '%'}]}
+2026-11-17 11:18:34 [info] Pushing xcom

@@ -46,3 +46,17 @@ models:
 seeds:
   nyc_taxi:
     +schema: silver
+
+# Tests of the two largest tables check only the months rebuilt by the latest build.
+# Every row inserted by one build shares the same load timestamp (one transaction), so
+# the first build is tested in full and a monthly run tests the months it rebuilt, not
+# the whole history: about 12 minutes saved per run for two months, more with thirteen.
+# Uniqueness across months holds by construction (the key starts with the source month).
+data_tests:
+  nyc_taxi:
+    marts:
+      fact:
+        +where: "gold_loaded_at = (select max(gold_loaded_at) from gold.fct_trip)"
+    intermediate:
+      trips:
+        +where: "silver_loaded_at = (select max(silver_loaded_at) from silver.trips)"

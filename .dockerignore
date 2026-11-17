@@ -1,0 +1,12 @@
+# Build context of airflow/Dockerfile is the repository root: keep it small.
+.git
+.env
+docs
+data
+**/__pycache__
+**/.pytest_cache
+**/.ruff_cache
+dbt/target
+dbt/dbt_packages
+dbt/logs
+airflow/logs

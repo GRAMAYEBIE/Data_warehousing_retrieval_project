@@ -20,7 +20,7 @@ that is not implemented yet.
 |---|---|---|
 | 1 | Docker Compose core, warehouse schemas and roles, landing zone, idempotent ingestion, bronze layer, manifest | **Built and verified** |
 | 2 | dbt: silver, quality flags, star schema, aggregates, tests, reconciliation | **Built and verified** (94/94 build steps green on two months) |
-| 3 | Airflow orchestration, publication gate, operational signals | Planned |
+| 3 | Airflow orchestration, publication gate, operational signals | **Built and verified** (successful run, failure and recovery, safe re-run) |
 | 4 | Semantic layer, Superset, six dashboards | Planned |
 | 5 | AI assistant: API, web interface, evaluation pack | Planned |
 | 6 | Extensions: Prometheus/Grafana, Kafka, MLflow | Planned, optional |
@@ -92,11 +92,32 @@ docker compose --profile core --profile tools run --rm ingestion yellow --month 
 The same commands exist as `make up`, `make zones`, `make ingest MONTH=2025-01`,
 `make ingest-force MONTH=2025-01`, `make test-ingestion`, `make lint-ingestion`.
 
-Exit codes of the ingestion command: `0` loaded or skipped, `2` source file not available,
-`3` file or contract rejected, `1` any other failure.
+`yellow` runs the two steps that Airflow runs separately: `land` (source → validated file
+in RustFS) and `load` (RustFS → bronze, after checking the SHA-256 against the manifest).
+`check` only tells whether a month is published.
+
+Exit codes of the ingestion command: `0` success (including "unchanged, nothing to do"),
+`2` source file not available, `3` file or contract rejected, `4` nothing landed to load,
+`1` any other failure.
 
 The init scripts in `infra/postgres/init/` run only when the PostgreSQL volume is created
-for the first time.
+for the first time. `04_ops_pipeline.sql` is idempotent and can be applied to an existing
+warehouse with
+`docker compose exec -T postgres psql -U postgres -d warehouse -f /docker-entrypoint-initdb.d/04_ops_pipeline.sql`.
+
+### Running the whole pipeline with Airflow
+
+```bash
+# 7. Start Airflow (init job: database migration and dbt manifest; then API, scheduler,
+#    DAG processor). UI: http://localhost:8080, user admin, password AIRFLOW_ADMIN_PASSWORD.
+docker compose --profile core --profile orchestration up -d
+
+# 8. Run the pipeline for one month (or use "Trigger DAG" in the UI with the same parameters)
+make run-month MONTH=2025-02          # make run-month-force MONTH=2025-02 to reload
+```
+
+Once dbt files change, refresh the manifest Cosmos reads with
+`docker compose --profile core --profile tools run --rm dbt parse`.
 
 ### Evidence of the three required behaviours (Q2)
 
@@ -652,16 +673,72 @@ specific fix are documented.
 
 ## 13. Orchestration and Docker Compose
 
-**Airflow (planned)**: DAG `monthly_yellow_pipeline`, monthly, targets M-2, retries with
-backoff, `max_active_runs=1` (no overlapping runs), `catchup=False` with manual backfill
-through a `month` parameter, deadline alerts, safe re-run with
-`dag_run.conf={"month": "2025-03", "force": true}`.
+### Airflow DAG `monthly_yellow_pipeline` (Q5)
 
-**After a partial failure**: every task can be replayed; landing and bronze are idempotent;
-`analytics` is never refreshed until the build is green.
+Airflow 3.3.1 (LocalExecutor) with astronomer-cosmos 1.16.0. Code:
+`airflow/dags/monthly_yellow_pipeline.py`, logic in `airflow/include/nyc_taxi_ops/`.
 
-**Operational signals (Q5.4)** in `ops.pipeline_signals`: freshness, volume versus the
-previous month, rate of invalid and suspicious rows, dbt test pass rate, task duration.
+```
+resolve_run → check_source → land_to_rustfs → load_bronze → anything_to_publish
+  → dbt_build (Cosmos: one run task + one test task per dbt model, 47 tasks)
+  → measure_signals → quality_gate_and_publish → record_outcome_and_notify
+```
+
+| Task | What it does | Runs as |
+|---|---|---|
+| `resolve_run` | Target month: the `month` parameter, or two months before the run date (TLC delay). Opens a row in `ops.pipeline_runs`. | publisher |
+| `check_source` | `HEAD` on the TLC file. A month not yet published fails with exit code 2 and is retried 4 times, 6 hours apart. | loader |
+| `land_to_rustfs` | Download, validate (Parquet, size, SHA-256, contract, schema drift), store in RustFS. Unchanged file → `skipped_unchanged`. | loader |
+| `load_bronze` | Reads the file **from RustFS**, checks its SHA-256 against the manifest, replaces the month partition in one transaction. | loader |
+| `anything_to_publish` | Short circuit: if every loaded batch is already in the last publication (and no `force`), the build steps are skipped and the run ends as `nothing_new`. | publisher |
+| `dbt_build` | Cosmos renders the dbt project from its manifest; each model is a `run` task followed by a `test` task. A failing test stops everything downstream. Test results are written to `ops.dbt_test_results` by a Cosmos callback. | transformer |
+| `measure_signals` | Five operational signals written to `ops.pipeline_signals` (below). | publisher |
+| `quality_gate_and_publish` | Gate: reconciliation without gap, no `fail` signal, no failed dbt test. Then the 14 approved tables and `pipeline_status` are copied to `analytics` and swapped in **one transaction**; `ops.publications` records the batches published. | publisher |
+| `record_outcome_and_notify` | Trigger rule `all_done`: always runs. Decides `published`, `nothing_new` or `failed` from the warehouse state, logs it, posts it to `NOTIFY_WEBHOOK_URL` when set, and fails the run when the outcome is `failed`. | publisher |
+
+**Why copies, not materialized views**: dbt replaces a table with `DROP TABLE ... CASCADE`
+(checked in `dbt/include/postgres/macros/relations/table/drop.sql`), which would silently
+drop any view built on a gold table. Copies keep the published state independent of the
+next build.
+
+**Scheduling and overlap**: cron `0 6 3 * *` (3rd of the month) set by `PIPELINE_SCHEDULE`;
+empty means manual runs only (used while historical months are loaded). `max_active_runs=1`
+so two monthly runs never overlap, `max_active_tasks=2` and dbt with one thread to fit the
+development machine, `catchup=False`, `dagrun_timeout` 6 hours.
+
+**Backfill and safe re-run**: trigger with `{"month": "2025-03"}` for any month, or
+`{"month": "2025-03", "force": true}` to reload a file even if it did not change. Every
+step is idempotent, so a re-run never duplicates anything.
+
+**After a partial failure**: clear the failed task in the Airflow UI; the steps before it
+are not redone. A batch that failed to load stays `landed` in the manifest, so the retry
+picks it up. Whatever failed, `analytics` keeps the previous publication until a run
+passes the gate.
+
+**Retries**: 2 retries with exponential backoff by default (5, then 10 minutes, at most
+30; in Airflow 3.3 `retry_exponential_backoff` is a multiplier, set to 2.0), 1 for dbt
+tasks and publication, 4 spaced 6 hours apart for the source check.
+
+**Verified runs (17 November 2026)**, details and logs in `docs/evidence/q05/README.md`:
+
+| Run | Scenario | Outcome |
+|---|---|---|
+| `first_run_2025_01` | First task timed out reaching the Airflow API (machine under load) | `failed`: every downstream task stopped, nothing published, failure recorded and reported |
+| `run_2025_01_attempt2` | Full run; `measure_signals` failed on a time-zone bug, was fixed, retried and cleared | `published`: 69/69 dbt tests passed, 5 signals ok, 14 tables published; dbt not redone after the failure |
+| `rerun_2025_01_nothing_new` | Same month again | `nothing_new` in 1 min 21 s: file unchanged, 48 build tasks skipped |
+
+### Operational signals (Q5.4)
+
+| Signal | Measure | Threshold | Effect |
+|---|---|---|---|
+| `freshness_days` | days since the last successful load | warn > 45 days | reported |
+| `volume_change_vs_prior_month` | bronze rows versus the previous month | warn > 20 %, fail > 50 % | fail blocks publication |
+| `rejected_row_rate` | suspicious + invalid share of silver rows | warn > 10 %, fail > 20 % | fail blocks publication |
+| `late_data_rate` | cross-month rows share | warn > 0.1 % | reported |
+| `dbt_test_pass_rate` | passed tests / tests run in this run | fail < 100 % | blocks publication |
+
+Task durations are in the Airflow UI and `ops.pipeline_runs` keeps the start and end of
+every run. All signals are published to `analytics` for Dashboard 5.
 
 **CI (planned)**: ruff, sqlfluff, pytest, eslint and tsc.
 
@@ -672,7 +749,8 @@ previous month, rate of invalid and suspicious rows, dbt test pass rate, task du
 | postgres 16 | 5432 | core | built |
 | rustfs (S3 API / console) | 9000 / 9001 | core | built |
 | ingestion (one-shot job) | – | tools | built |
-| airflow (api-server, scheduler, dag-processor, triggerer) | 8080 | core | planned |
+| airflow-init (one-shot: database migration, dbt manifest) | – | orchestration | built |
+| airflow (api-server, scheduler, dag-processor) | 8080 | orchestration | built |
 | dbt-docs | 8085 | core | planned |
 | superset + redis | 8088 | bi | planned |
 | ollama | 11434 | ai | planned |
