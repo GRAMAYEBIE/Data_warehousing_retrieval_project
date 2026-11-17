@@ -19,7 +19,7 @@ that is not implemented yet.
 | Wave | Scope | Status |
 |---|---|---|
 | 1 | Docker Compose core, warehouse schemas and roles, landing zone, idempotent ingestion, bronze layer, manifest | **Built and verified** |
-| 2 | dbt: silver, quality flags, star schema, aggregates, tests, reconciliation | Planned |
+| 2 | dbt: silver, quality flags, star schema, aggregates, tests, reconciliation | **Built and verified** (94/94 build steps green on two months) |
 | 3 | Airflow orchestration, publication gate, operational signals | Planned |
 | 4 | Semantic layer, Superset, six dashboards | Planned |
 | 5 | AI assistant: API, web interface, evaluation pack | Planned |
@@ -299,9 +299,55 @@ a 12-second query by `ai_reader` is cancelled; warehouse roles cannot connect to
 
 ---
 
-## 8. dbt: transformation, quality, star schema (planned)
+## 8. dbt: transformation, quality, star schema
 
-Project `dbt/` (dbt-core, dbt-postgres; packages `dbt_utils`, `dbt_expectations`).
+Project `dbt/` (dbt-core, dbt-postgres; package `dbt_utils`). Staging, silver, quality
+flags, star schema, aggregates and the reconciliation are built and tested.
+
+```bash
+docker compose --profile core --profile tools run --rm dbt deps     # once
+docker compose --profile core --profile tools run --rm dbt build    # new or changed months only
+docker compose --profile core --profile tools run --rm dbt build --vars "{months: ['2025-01-01']}"  # one month
+docker compose --profile core --profile tools run --rm dbt docs generate
+```
+
+### Results on the two loaded months (17 November 2026)
+
+`dbt build`: **94 of 94 steps passed** (22 models and seed, 72 tests), 44 minutes on the
+development machine. Log: `docs/evidence/q04/dbt_build_two_months.log`.
+
+| Source file | Bronze rows | Silver rows | Quarantine | Unexplained | Valid | Suspicious | Invalid | Valid-trip rate |
+|---|---|---|---|---|---|---|---|---|
+| 2024-12 | 3,668,371 | 3,668,371 | 0 | 0 | 3,435,481 | 153,480 | 79,410 | 93.65 % |
+| 2025-01 | 3,475,226 | 3,475,226 | 0 | 0 | 3,177,890 | 152,379 | 144,957 | 91.44 % |
+
+| Source file | Bronze total_amount | Silver total_amount | Gap | Valid | Suspicious | Invalid |
+|---|---|---|---|---|---|---|
+| 2024-12 | 103,889,786.46 | 103,889,786.46 | 0.00 | 99,175,879.76 | 6,672,877.74 | −1,958,971.04 |
+| 2025-01 | 89,005,026.80 | 89,005,026.80 | 0.00 | 84,627,059.93 | 5,694,056.38 | −1,316,089.51 |
+
+Every row and every cent of bronze is in silver; every exclusion from approved metrics is
+explained by a flag (`docs/evidence/q03/recon_bronze_silver.txt`). Invalid rows carry a
+negative total: they are mainly refunds and disputes (`negative_amount`: 79,303 rows in
+2024-12, 144,833 in 2025-01).
+
+**Duplicates**: 0 in both files, with the 7-column natural key. Checked independently on
+the raw bronze columns of 2025-01 (0 groups). The rule stays in place for later months.
+
+**Traceability**: trip `20250100001204` in `gold.fct_trip` is row 1204 of
+`yellow_tripdata_2025-01.parquet` (pickup 2025-01-01 00:33:45, zone 79 → 107, 12.12 USD),
+identical in the raw file, bronze, silver and gold.
+
+**Volume**: bronze 2.4 GB, silver 3.2 GB, gold 2.5 GB for two months. Silver takes about
+9 minutes per month on 4 GB of Docker memory.
+
+**Failing test and response (defence)**: the first build was run on January only. The
+test `assert_bronze_rows_reconcile_with_silver` failed because December was in bronze
+but not in silver (`docs/evidence/q04/failing_test_reconciliation_first_build.log`). The
+response was to build the missing month; the test then passed.
+
+**Idempotence**: a second `dbt build` with no new batch processes no month
+(`months to process: 1900-01-01`, a sentinel that matches no partition).
 
 **Pinned versions** (dependency resolution trial of 16 November 2026, Python 3.12). dbt and
 Airflow are installed in two separate environments, as Cosmos recommends.
@@ -321,10 +367,18 @@ The trial proves that each set of packages installs together. Running them (`dbt
 
 ### Layers
 
-- `models/staging/`: `stg_yellow_trips`, `stg_taxi_zones`, `stg_holidays`. Snake case names, explicit casts (timestamps, `numeric(10,2)` for amounts, `smallint` for codes).
-- `models/intermediate/` (= **silver**): `int_trips_flagged` (flags, status, deduplication), `int_trips_quarantine`.
-- `models/marts/` (= **gold**): `fct_trip`, dimensions, `agg_*`.
-- `models/semantic/`: MetricFlow semantic models and metrics.
+- `models/staging/` (views in `silver`): `stg_yellow_trips`, `stg_taxi_zones`. Snake case names, explicit casts (timestamps, `numeric(12,2)` for distance and amounts, `smallint` for codes) that return NULL instead of failing.
+- `models/intermediate/` (= **silver**): `int_trips_flagged` → `silver.trips` (flags, status, deduplication), `int_trips_quarantine` → `silver.trips_quarantine`, `quality_flag_catalog`.
+- `models/marts/` (= **gold**): `fct_trip`, dimensions, `agg_*`, `recon_bronze_silver`.
+- `seeds/`: `us_ny_holidays` (US federal + New York State holidays, library `holidays` 0.108).
+- `models/semantic/` (planned, wave 4): MetricFlow semantic models and metrics.
+
+**Monthly incremental logic** (`macros/months_to_process.sql`): a month is rebuilt when its
+latest loaded batch differs from the batch already in the model, together with its two
+neighbours (cross-month duplicates). The list is computed before the query and written as
+date literals: PostgreSQL then prunes bronze partitions at plan time and estimates the
+boundary-day filters correctly. With a subquery instead, the silver build did not finish
+in 9 minutes for one month; with literals it takes about 9 minutes for two.
 
 The `analytics` materialized views are created by `infra/postgres` and refreshed by the
 publication task, **not** by dbt.
@@ -334,7 +388,7 @@ publication task, **not** by dbt.
 | Flag | Rule | Severity |
 |---|---|---|
 | `negative_amount` | any amount below 0 | invalid |
-| `pickup_after_dropoff` | pickup ≥ dropoff | invalid |
+| `pickup_after_dropoff` | pickup strictly after dropoff (a zero-duration trip is `unrealistic_duration`) | invalid |
 | `duplicate` | see below | invalid |
 | `out_of_period` | pickup more than 3 days away from the file month (other year, future date) | invalid |
 | `implausible_speed` | speed above 80 mph | suspicious |
@@ -343,17 +397,27 @@ publication task, **not** by dbt.
 | `zero_distance` | distance = 0 with an amount above 0 | suspicious |
 | `null_zone` | pickup or dropoff zone NULL or in {264, 265} | suspicious |
 | `unknown_payment` / `unknown_ratecode` | code present but outside the known list | suspicious |
-| `amount_mismatch` | `total_amount` differs from the sum of its components (± 0.05) | suspicious |
 | `cross_month` | pickup within 3 days before or after the file month | info |
-| `not_reported` | payment type, rate code or passenger count NULL | info |
+| `not_reported` | rate code or passenger count NULL | info |
+| `component_mismatch` | `total_amount` differs from the sum of its components (± 0.05) | info |
 
 Status: `invalid` > `suspicious` > `valid`. A row with only `info` flags stays `valid`.
 Thresholds are dbt `vars`.
 
-**One list of flags**: the dbt seed `seeds/quality_flag_catalog.csv`
-(`flag_code, description, severity, rule_summary, threshold_var, exam_requirement`) drives
-the status calculation, the tests, `dim_trip_quality`, the data dictionary and the labels of
-Dashboard 5. Adding a flag means one row in the seed and one expression in the model.
+**One list of flags**: the macro `quality_flag_catalog()` in `dbt/macros/quality_flags.sql`
+(`code, severity, description, rule, exam_requirement`) is the only place where flags are
+declared. It drives the status calculation, the flag list, and the table
+`silver.quality_flag_catalog` read by `dim_trip_quality`, the data dictionary and
+Dashboard 5. Adding a flag means one entry in the macro and one expression in the model.
+
+**Fare components are not additive across vendors.** Measured on 2025-01, `total_amount`
+equals the sum of its components for 98.6 % of vendor 2 rows but only 9.0 % of vendor 1
+rows (vendor 1 reports the congestion charges inside `extra`, typical gap 3.25 USD) and
+12.1 % of rows with unreported codes (the surcharge is in the total but not in its
+column, typical gap 2.50 USD). A `suspicious` flag would have rejected 32 % of trips for a
+reporting convention, so `component_mismatch` is informative only. Consequences:
+`total_amount` is the governed revenue measure, and any breakdown of revenue by component
+(Dashboards 1 and 4) is indicative and labelled as such.
 
 **Storage**: one boolean column per flag (`is_negative_amount`, …) is the source of truth
 and is easy to filter in Superset; `quality_flags text[]` is derived for reading;
@@ -394,48 +458,54 @@ Tip metrics stay limited to `payment_type = 1`; breakdowns by rate code or passe
 a "Not reported" category. `ratecodeid = 99` (41,963 rows) is a present code and is flagged
 `unknown_ratecode`.
 
-**Bronze → silver reconciliation**: `gold.recon_bronze_silver` (per month: bronze rows,
-silver rows, rows per status, sum of `total_amount` in bronze versus valid silver, gap
-explained per flag) with a test that fails when a gap is not explained.
+**Bronze → silver reconciliation**: `gold.recon_bronze_silver`, one row per source month:
+file, bronze, silver and quarantine rows; rows and `total_amount` per status; rows per
+flag. Tests fail when `unexplained_rows` is not 0 or `unexplained_amount` is not 0.00.
 
 ### Star schema (Q4), grain: one completed taxi trip
 
-- `fct_trip`: `trip_sk` = `generate_surrogate_key(source_month, file_row_number)`, `source_month`, `file_row_number`, `batch_id`, foreign keys (`date_sk, pickup_time_sk, pickup_zone_sk, dropoff_zone_sk, payment_type_sk, rate_code_sk, vendor_sk, service_period_sk, trip_quality_sk`), measures (fare, extra, mta_tax, tip, tolls, improvement_surcharge, congestion_surcharge, airport_fee, cbd_congestion_fee, total_amount, distance, duration_min, speed_mph, passenger_count), `is_airport_trip`, `quality_status`, `quality_flags`. Incremental `delete+insert` by `source_month`; indexes on `(date_sk)` and `(pickup_zone_sk)`, BRIN on `pickup_ts`.
+- `fct_trip`: `trip_sk` = YYYYMM of the source file followed by the 0-based row number on 8 digits (deterministic, readable, half the size of a hash: `20250100001204` is row 1204 of the 2025-01 file), `source_month`, `file_row_number`, `batch_id`, foreign keys (`date_sk, pickup_time_sk, pickup_zone_sk, dropoff_zone_sk, payment_type_sk, rate_code_sk, vendor_sk, service_period_sk, trip_quality_sk`), measures (fare, extra, mta_tax, tip, tolls, improvement_surcharge, congestion_surcharge, airport_fee, cbd_congestion_fee, total_amount, distance, duration_min, speed_mph, passenger_count), `is_airport_trip`, `quality_status`, `quality_flags`. Incremental `delete+insert` by `source_month`; indexes on `(date_sk)` and `(pickup_zone_sk)`, BRIN on `pickup_ts`.
 - Required dimensions: `dim_date` (`is_holiday`, `holiday_name`, `is_weekend`), `dim_time`, `dim_pickup_zone` and `dim_dropoff_zone` (role-playing views of `dim_zone`: borough, zone, service_zone, `is_airport`, `is_manhattan_core`), `dim_payment_type`, `dim_rate_code`.
 - Extensions: `dim_vendor`, `dim_service_period` (AM peak 7–10, PM peak 16–20, late night 0–5, off-peak), `dim_trip_quality` (junk dimension of flag combinations).
-- **"Unknown" member** (key `-1`) in every dimension: NULL zones, unknown codes, dates out of range.
+- **"Unknown" member** (key `-1`) in every dimension: NULL zones, unknown codes, dates out of range. `dim_rate_code` also has **"Not reported"** (`-2`) so the 9–16 % of trips without a rate code are not mixed with code 99.
+- All foreign keys of `fct_trip` are tested with `relationships`: every trip resolves to a dimension row.
 - **Full refresh** when a quality rule, a dimension or the source contract changes.
 
 ### Aggregates (sums and counts only), published in `analytics`
 
 | Table | Grain | Used by |
 |---|---|---|
-| `agg_trips_daily` | day × pickup zone × payment type × rate code × vendor × status | Dashboards 1, 4, 5 |
-| `agg_trips_hourly` | day × hour × pickup zone × airport flag | Dashboards 2, 6; `trips_per_active_hour` |
-| `agg_routes_monthly` | month × pickup zone × dropoff zone × service period | Dashboards 3, 6 |
-| `agg_quality_daily` | day × vendor × borough × flag | Dashboard 5 |
-| `agg_route_duration_baseline` | route × hour: reference median and MAD versus current month (robust z-score) | Dashboard 5 |
-| `ops_freshness`, `ops_batches` | per month / per batch | "last refreshed" tile, Dashboards 1 and 5 |
+| `agg_trips_daily` (179,492 rows) | day × pickup zone × payment type × rate code × vendor × status | Dashboards 1, 4, 5 |
+| `agg_trips_hourly` (383,826 rows) | day × hour × pickup zone × service period × airport flag × status | Dashboards 2, 6; `trips_per_active_hour` |
+| `agg_routes_monthly` (110,618 rows) | month × pickup zone × dropoff zone × service period, valid trips | Dashboards 3, 6 |
+| `agg_quality_daily` (76,243 rows) | source month × day × vendor × pickup zone × payment type, trips per status and per flag | Dashboard 5 |
+| `agg_route_duration_baseline` (planned) | route × hour: reference median and MAD versus current month (robust z-score) | Dashboard 5 |
+| `ops_freshness`, `ops_batches` (planned, wave 3) | per month / per batch | "last refreshed" tile, Dashboards 1 and 5 |
 
 Every materialized view has a unique index (required by `REFRESH ... CONCURRENTLY`).
 
 ### dbt tests
 
 `unique` and `not_null` on every key, `accepted_values` on codes, `relationships` from the
-fact to the dimensions, at least one business assertion (`total_amount` ≈ sum of components
-± 0.05 for valid rows), source `freshness` (warn 45 days, error 75 days on `ingested_at`),
-enforced contracts on marts, dbt unit tests on the flag logic, volume test against the
-previous month. **Blocking tests are on silver.**
+fact to the dimensions, business assertions (no row lost between bronze and silver; every
+`valid` trip respects the agreed thresholds), source `freshness` on the ingestion manifest
+(warn 45 days, error 75 days since the last successful load). Planned: enforced contracts
+on marts, dbt unit tests on the flag logic, volume test against the previous month.
+**Blocking tests are on silver**: when one fails, dbt skips every gold model downstream.
 
 ### Macros (Q4.5)
 
-`quality_flag_array()`, `safe_divide()`, `month_partition_replace()` (pre-hook), `unknown_member()`.
+`quality_flag_catalog()`, `quality_status()`, `quality_flag_array()` (flags declared once),
+`safe_smallint()`, `safe_amount()`, `has_cast_error()` (casts that never fail),
+`safe_divide()`, `months_to_process()` and `date_literals()` (shared monthly incremental
+logic), `service_period_sk()`, `generate_schema_name()`.
 
 ### Exposures and documentation
 
-`models/exposures.yml` declares the six Superset dashboards and the AI assistant as dbt
-`exposures`, so the lineage graph goes from the source file to the dashboard (Q11).
-`dbt docs generate` is served in Compose (port 8085) and exported to `docs/dbt_docs/`.
+Planned (wave 4): `models/exposures.yml` declares the six Superset dashboards and the AI
+assistant as dbt `exposures`, so the lineage graph goes from the source file to the
+dashboard (Q11). The generated documentation site (models, sources, tests, lineage) is
+exported to `docs/dbt_docs/`; it will also be served in Compose (port 8085).
 
 ---
 
@@ -708,5 +778,5 @@ queried directly by every tool, separate environments and backups.
 
 ## 18. Next step
 
-Wave 2: the dbt project (staging, silver with quality flags, star schema, aggregates, tests
-and reconciliation).
+Wave 3: Airflow orchestration with Cosmos, the publication gate to `analytics`, and the
+operational signals.

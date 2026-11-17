@@ -1,0 +1,48 @@
+name: nyc_taxi
+version: "1.0.0"
+config-version: 2
+profile: nyc_taxi
+
+model-paths: ["models"]
+macro-paths: ["macros"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+
+clean-targets: ["target", "dbt_packages"]
+
+vars:
+  # Quality thresholds (see macros/quality_flags.sql for the flag catalogue).
+  cross_month_tolerance_days: 3
+  max_speed_mph: 80
+  max_distance_miles: 200
+  min_duration_minutes: 1
+  max_duration_minutes: 360
+  amount_tolerance: 0.05
+  unknown_zone_ids: [264, 265]
+  known_payment_types: [0, 1, 2, 3, 4, 5, 6]
+  known_rate_codes: [1, 2, 3, 4, 5, 6]
+  # Airport zones: 1 Newark (EWR), 132 JFK, 138 LaGuardia. Airport rate codes: 2 JFK, 3 Newark.
+  airport_zone_ids: [1, 132, 138]
+  airport_rate_codes: [2, 3]
+  # Calendar covered by dim_date: the loaded months plus the cross-month tolerance.
+  calendar_start: "2024-11-01"
+  calendar_end: "2026-01-31"
+  # Optional list of source months to (re)process, e.g. --vars '{months: ["2025-01-01"]}'.
+  # Empty: process every month whose latest loaded batch is not in silver yet.
+  months: []
+
+models:
+  nyc_taxi:
+    staging:
+      +schema: silver
+      +materialized: view
+    intermediate:
+      +schema: silver
+      +materialized: table
+    marts:
+      +schema: gold
+      +materialized: table
+
+seeds:
+  nyc_taxi:
+    +schema: silver

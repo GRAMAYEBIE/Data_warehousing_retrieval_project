@@ -1,0 +1,19 @@
+version: 2
+
+seeds:
+  - name: us_ny_holidays
+    description: >
+      Public holidays, US federal plus New York State, November 2024 to January 2026.
+      External reference data generated with the Python library `holidays` 0.108
+      (country US, subdivision NY). Used by dim_date for the holiday demand analysis.
+    config:
+      schema: silver
+      column_types:
+        holiday_date: date
+        holiday_name: text
+    columns:
+      - name: holiday_date
+        description: Date of the public holiday.
+        data_tests: [unique, not_null]
+      - name: holiday_name
+        description: Name of the public holiday.

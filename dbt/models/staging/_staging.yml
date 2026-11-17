@@ -1,0 +1,22 @@
+version: 2
+
+models:
+  - name: stg_yellow_trips
+    description: >
+      Bronze trips with business names and explicit types: smallint for coded fields,
+      numeric(12, 2) for distance and amounts, timestamp without time zone (New York
+      local time). No filtering and no correction.
+    columns:
+      - name: source_month
+        description: First day of the month of the source file.
+      - name: file_row_number
+        description: 0-based position of the row in the source Parquet file.
+      - name: has_cast_error
+        description: True when a value present in bronze could not be cast; the row goes to quarantine.
+
+  - name: stg_taxi_zones
+    description: Typed TLC taxi zone lookup (265 zones; 264 and 265 are Unknown / N/A).
+    columns:
+      - name: location_id
+        description: TLC zone identifier.
+        data_tests: [unique, not_null]

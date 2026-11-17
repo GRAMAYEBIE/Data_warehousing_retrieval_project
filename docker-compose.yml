@@ -90,6 +90,22 @@ services:
       rustfs:
         condition: service_healthy
 
+  dbt:
+    build: ./dbt
+    profiles: [tools]
+    environment:
+      DBT_HOST: postgres
+      DBT_PORT: "5432"
+      DBT_DATABASE: ${POSTGRES_DB}
+      DBT_USER: transformer
+      DBT_PASSWORD: ${TRANSFORMER_PASSWORD}
+      DBT_THREADS: ${DBT_THREADS:-2}
+    volumes:
+      - ./dbt:/usr/app/dbt
+    depends_on:
+      postgres:
+        condition: service_healthy
+
 volumes:
   postgres_data:
   rustfs_data:

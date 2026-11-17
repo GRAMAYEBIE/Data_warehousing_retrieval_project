@@ -1,0 +1,170 @@
+version: 2
+
+models:
+  - name: fct_trip
+    description: >
+      Fact table of the star schema. Grain: one completed taxi trip, that is one row of
+      a monthly TLC file. Every silver row is kept with its quality status; approved
+      metrics use quality_status = 'valid'.
+    columns:
+      - name: trip_sk
+        description: >
+          Surrogate key, deterministic and readable: YYYYMM of the source file followed
+          by the 0-based row number in that file on 8 digits (20250100001204 = row 1204
+          of the 2025-01 file).
+        data_tests: [unique, not_null]
+      - name: pickup_date_sk
+        description: Pickup date (YYYYMMDD), -1 when missing or outside the calendar.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments: {to: ref('dim_date'), field: date_sk}
+      - name: pickup_time_sk
+        description: Pickup minute of the day (HHMM), -1 when missing.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments: {to: ref('dim_time'), field: time_sk}
+      - name: pickup_zone_sk
+        description: Pickup zone, -1 when the zone id is missing.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments: {to: ref('dim_pickup_zone'), field: pickup_zone_sk}
+      - name: dropoff_zone_sk
+        description: Dropoff zone, -1 when the zone id is missing.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments: {to: ref('dim_dropoff_zone'), field: dropoff_zone_sk}
+      - name: payment_type_sk
+        description: Payment type, -1 when the code is missing or unknown.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments: {to: ref('dim_payment_type'), field: payment_type_sk}
+      - name: rate_code_sk
+        description: Rate code, -1 when unknown, -2 when not reported by the vendor.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments: {to: ref('dim_rate_code'), field: rate_code_sk}
+      - name: vendor_sk
+        description: Vendor, -1 when the code is missing or unknown.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments: {to: ref('dim_vendor'), field: vendor_sk}
+      - name: service_period_sk
+        description: Service period of the pickup (AM peak, PM peak, late night, off-peak).
+        data_tests:
+          - not_null
+          - relationships:
+              arguments: {to: ref('dim_service_period'), field: service_period_sk}
+      - name: trip_quality_sk
+        description: Combination of quality flags raised on the trip.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments: {to: ref('dim_trip_quality'), field: trip_quality_sk}
+      - name: source_month
+        description: Month of the source file (degenerate identifier).
+        data_tests: [not_null]
+      - name: file_row_number
+        description: 0-based row number in the source file (degenerate identifier).
+        data_tests: [not_null]
+      - name: batch_id
+        description: Ingestion batch that loaded the trip (ops.ingestion_manifest).
+        data_tests: [not_null]
+      - name: total_amount
+        description: Total charged to the passenger in USD. The governed revenue measure.
+      - name: is_airport_trip
+        description: Pickup or dropoff at EWR, JFK or LGA, or a JFK / Newark rate code.
+      - name: is_tip_recorded
+        description: True for card payments, the only ones for which tips are recorded.
+      - name: quality_status
+        description: valid, suspicious or invalid.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [valid, suspicious, invalid]
+
+  - name: dim_date
+    description: Calendar day with weekend and public-holiday attributes. -1 is the Unknown member.
+    columns:
+      - name: date_sk
+        description: Date as YYYYMMDD.
+        data_tests: [unique, not_null]
+      - name: day_type
+        description: Weekday, Weekend or Public holiday.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [Weekday, Weekend, "Public holiday", Unknown]
+
+  - name: dim_time
+    description: Minute of the day with hour and day part. -1 is the Unknown member.
+    columns:
+      - name: time_sk
+        description: Minute of the day as HHMM.
+        data_tests: [unique, not_null]
+
+  - name: dim_zone
+    description: >
+      TLC taxi zone with borough, airport flag and market segment. is_manhattan_core is
+      a proxy (Manhattan zones of the "Yellow Zone" service zone). -1 is the Unknown member.
+    columns:
+      - name: zone_sk
+        description: Zone key (the TLC LocationID, or -1).
+        data_tests: [unique, not_null]
+
+  - name: dim_pickup_zone
+    description: Role-playing view of dim_zone for the pickup location.
+    columns:
+      - name: pickup_zone_sk
+        description: Pickup zone key.
+        data_tests: [unique, not_null]
+
+  - name: dim_dropoff_zone
+    description: Role-playing view of dim_zone for the dropoff location.
+    columns:
+      - name: dropoff_zone_sk
+        description: Dropoff zone key.
+        data_tests: [unique, not_null]
+
+  - name: dim_payment_type
+    description: TLC payment types. Tips are recorded for card payments only.
+    columns:
+      - name: payment_type_sk
+        description: Payment type key.
+        data_tests: [unique, not_null]
+
+  - name: dim_rate_code
+    description: TLC rate codes, with Unknown (-1) and Not reported (-2) members.
+    columns:
+      - name: rate_code_sk
+        description: Rate code key.
+        data_tests: [unique, not_null]
+
+  - name: dim_vendor
+    description: Technology providers that report the trips.
+    columns:
+      - name: vendor_sk
+        description: Vendor key.
+        data_tests: [unique, not_null]
+
+  - name: dim_service_period
+    description: Service periods for capacity analysis (peak and off-peak).
+    columns:
+      - name: service_period_sk
+        description: Service period key.
+        data_tests: [unique, not_null]
+
+  - name: dim_trip_quality
+    description: >
+      Junk dimension with one row per combination of quality flags observed in silver,
+      its status and one boolean per flag.
+    columns:
+      - name: trip_quality_sk
+        description: Hash of the flag list.
+        data_tests: [unique, not_null]

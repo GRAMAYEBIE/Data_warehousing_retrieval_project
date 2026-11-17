@@ -1,0 +1,65 @@
+﻿23:10:56  Running with dbt=1.12.7
+23:10:57  Registered adapter: postgres=1.11.0
+23:10:58  Unable to do partial parsing because config vars, config profile, or config target have changed
+23:11:13  Found 5 models, 17 data tests, 3 sources, 603 macros
+23:11:13  
+23:11:13  Concurrency: 2 threads (target='dev')
+23:11:13  
+23:11:14  1 of 22 START sql table model silver.quality_flag_catalog ...................... [RUN]
+23:11:14  2 of 22 START sql view model silver.stg_taxi_zones ............................. [RUN]
+23:11:14  1 of 22 OK created sql table model silver.quality_flag_catalog ................. [SELECT 14 in 0.52s]
+23:11:14  2 of 22 OK created sql view model silver.stg_taxi_zones ........................ [CREATE VIEW in 0.52s]
+23:11:14  3 of 22 START test source_not_null_bronze_yellow_trips_raw_batch_id ............ [RUN]
+23:11:14  4 of 22 START test source_not_null_bronze_yellow_trips_raw_file_row_number ..... [RUN]
+23:11:15  4 of 22 PASS source_not_null_bronze_yellow_trips_raw_file_row_number ........... [PASS in 0.18s]
+23:11:15  3 of 22 PASS source_not_null_bronze_yellow_trips_raw_batch_id .................. [PASS in 0.19s]
+23:11:15  5 of 22 START test source_not_null_bronze_yellow_trips_raw_source_month ........ [RUN]
+23:11:15  6 of 22 START test accepted_values_quality_flag_catalog_severity__invalid__suspicious__info  [RUN]
+23:11:15  5 of 22 PASS source_not_null_bronze_yellow_trips_raw_source_month .............. [PASS in 0.11s]
+23:11:15  7 of 22 START test not_null_quality_flag_catalog_flag_code ..................... [RUN]
+23:11:15  6 of 22 PASS accepted_values_quality_flag_catalog_severity__invalid__suspicious__info  [PASS in 0.13s]
+23:11:15  8 of 22 START test unique_quality_flag_catalog_flag_code ....................... [RUN]
+23:11:15  7 of 22 PASS not_null_quality_flag_catalog_flag_code ........................... [PASS in 0.13s]
+23:11:15  8 of 22 PASS unique_quality_flag_catalog_flag_code ............................. [PASS in 0.11s]
+23:11:15  9 of 22 START test not_null_stg_taxi_zones_location_id ......................... [RUN]
+23:11:15  10 of 22 START test unique_stg_taxi_zones_location_id .......................... [RUN]
+23:11:15  10 of 22 PASS unique_stg_taxi_zones_location_id ................................ [PASS in 0.15s]
+23:11:15  9 of 22 PASS not_null_stg_taxi_zones_location_id ............................... [PASS in 0.16s]
+23:11:15  11 of 22 START sql view model silver.stg_yellow_trips .......................... [RUN]
+23:11:15  11 of 22 OK created sql view model silver.stg_yellow_trips ..................... [CREATE VIEW in 0.18s]
+23:11:15  12 of 22 START sql incremental model silver.trips .............................. [RUN]
+23:11:15  13 of 22 START sql incremental model silver.trips_quarantine ................... [RUN]
+23:14:25  13 of 22 OK created sql incremental model silver.trips_quarantine .............. [SELECT 0 in 188.83s]
+23:29:11  12 of 22 OK created sql incremental model silver.trips ......................... [SELECT 3475226 in 1076.14s]
+23:29:12  14 of 22 START test accepted_values_int_trips_flagged_quality_status__valid__suspicious__invalid  [RUN]
+23:29:12  15 of 22 START test assert_bronze_rows_reconcile_with_silver ................... [RUN]
+23:29:25  14 of 22 PASS accepted_values_int_trips_flagged_quality_status__valid__suspicious__invalid  [PASS in 12.92s]
+23:29:25  15 of 22 FAIL 1 assert_bronze_rows_reconcile_with_silver ....................... [FAIL 1 in 12.91s]
+23:29:25  16 of 22 START test assert_valid_trips_are_plausible ........................... [RUN]
+23:29:25  17 of 22 START test dbt_utils_unique_combination_of_columns_int_trips_flagged_source_month__file_row_number  [RUN]
+23:29:34  16 of 22 PASS assert_valid_trips_are_plausible ................................. [PASS in 9.71s]
+23:29:34  18 of 22 START test not_null_int_trips_flagged_batch_id ........................ [RUN]
+23:29:37  18 of 22 PASS not_null_int_trips_flagged_batch_id .............................. [PASS in 2.64s]
+23:29:37  19 of 22 START test not_null_int_trips_flagged_file_row_number ................. [RUN]
+23:29:43  19 of 22 PASS not_null_int_trips_flagged_file_row_number ....................... [PASS in 6.09s]
+23:29:44  20 of 22 START test not_null_int_trips_flagged_quality_flags ................... [RUN]
+23:29:49  20 of 22 PASS not_null_int_trips_flagged_quality_flags ......................... [PASS in 5.08s]
+23:29:49  21 of 22 START test not_null_int_trips_flagged_quality_status .................. [RUN]
+23:29:53  21 of 22 PASS not_null_int_trips_flagged_quality_status ........................ [PASS in 4.48s]
+23:29:53  22 of 22 START test not_null_int_trips_flagged_source_month .................... [RUN]
+23:29:54  22 of 22 PASS not_null_int_trips_flagged_source_month .......................... [PASS in 0.54s]
+23:30:01  17 of 22 PASS dbt_utils_unique_combination_of_columns_int_trips_flagged_source_month__file_row_number  [PASS in 36.46s]
+23:30:02  
+23:30:02  Finished running 2 incremental models, 1 table model, 17 data tests, 2 view models in 0 hours 18 minutes and 48.48 seconds (1128.48s).
+23:30:04  
+23:30:04  Completed with 1 error, 0 partial successes, and 0 warnings:
+23:30:04  
+23:30:04  [ERROR]: in test assert_bronze_rows_reconcile_with_silver (tests/assert_bronze_rows_reconcile_with_silver.sql)
+23:30:04    Got 1 result, configured to fail if != 0
+23:30:04  
+23:30:04    compiled code at target/compiled/nyc_taxi/tests/assert_bronze_rows_reconcile_with_silver.sql
+23:30:04  
+23:30:04  Done. PASS=21 WARN=0 ERROR=1 SKIP=0 NO-OP=0 REUSED=0 TOTAL=22
+dbt exit: 1
+
+[exited with code 1]

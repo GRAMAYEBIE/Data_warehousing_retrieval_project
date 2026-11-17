@@ -1,0 +1,7 @@
+# Pinned dbt environment (resolved together on 2026-11-16, Python 3.12).
+dbt-core==1.12.7
+dbt-postgres==1.11.0
+dbt-metricflow==0.15.0
+metricflow==0.213.0
+sqlfluff==3.5.0
+sqlfluff-templater-dbt==3.5.0

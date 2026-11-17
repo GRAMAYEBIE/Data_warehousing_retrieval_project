@@ -1,0 +1,73 @@
+version: 2
+
+models:
+  - name: agg_trips_daily
+    description: >
+      Additive daily aggregate (sums and counts only) by pickup day, pickup zone, payment
+      type, rate code, vendor and quality status. Source of the published trips dataset
+      and of most governed metrics. Ratios are computed at read time.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              [pickup_date_sk, pickup_zone_sk, payment_type_sk, rate_code_sk, vendor_sk, quality_status]
+    columns:
+      - name: trip_count
+        description: Number of trips.
+        data_tests: [not_null]
+      - name: sum_total_amount
+        description: Sum of total_amount (USD), tolls, surcharges, fees and recorded tips included.
+      - name: sum_tip_amount_recorded
+        description: Sum of tips on trips where tips are recorded (card payments).
+      - name: sum_fare_amount_tip_recorded
+        description: Sum of fares on trips where tips are recorded; denominator of the tip rate.
+
+  - name: agg_trips_hourly
+    description: >
+      Additive hourly aggregate by pickup day, hour, pickup zone, service period, airport
+      flag and quality status. Used for demand rhythm and trips per active hour.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              [pickup_date_sk, pickup_hour, pickup_zone_sk, service_period_sk, is_airport_trip, quality_status]
+
+  - name: agg_routes_monthly
+    description: >
+      Additive monthly aggregate by route (pickup zone to dropoff zone) and service
+      period, valid trips only.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              [pickup_month, pickup_zone_sk, dropoff_zone_sk, service_period_sk]
+
+  - name: agg_quality_daily
+    description: >
+      Data-quality aggregate by source month, pickup day, vendor, pickup zone and payment
+      type: trips per status and trips raising each flag.
+
+  - name: recon_bronze_silver
+    description: >
+      Bronze to silver reconciliation per source file month: row counts (bronze = silver
+      + quarantine), rows and amounts per quality status, rows per flag.
+    columns:
+      - name: source_month
+        description: Month of the source file.
+        data_tests: [unique, not_null]
+      - name: unexplained_rows
+        description: bronze rows - silver rows - quarantine rows. Must be 0.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [0]
+                quote: false
+      - name: unexplained_amount
+        description: bronze total_amount - silver total_amount. Must be 0.00.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: -0.01
+                max_value: 0.01
+      - name: valid_trip_rate_pct
+        description: Share of silver rows with status valid, in percent.

@@ -1,0 +1,42 @@
+version: 2
+
+sources:
+  - name: bronze
+    description: >
+      Immutable, source-aligned records loaded by the ingestion service. One partition
+      per monthly TLC file; a re-run replaces the whole partition.
+    schema: bronze
+    tables:
+      - name: yellow_trips_raw
+        description: >
+          NYC TLC Yellow Taxi trips as published, plus ingestion metadata. Key:
+          (source_month, file_row_number), where file_row_number is the 0-based
+          position of the row in its Parquet file.
+        columns:
+          - name: source_month
+            description: First day of the month of the source file.
+            data_tests: [not_null]
+          - name: file_row_number
+            description: 0-based position of the row in the source Parquet file.
+            data_tests: [not_null]
+          - name: batch_id
+            description: Ingestion batch that loaded the row (ops.ingestion_manifest).
+            data_tests: [not_null]
+      - name: taxi_zone_raw
+        description: TLC taxi zone lookup, loaded as text and fully replaced on each run.
+
+  - name: ops
+    description: Operational metadata written by the ingestion service.
+    schema: ops
+    tables:
+      - name: ingestion_manifest
+        description: One row per ingestion attempt, with status, checksums and row counts.
+        # Freshness is measured on the manifest: one small table instead of a scan of bronze.
+        # TLC publishes about two months late, so a healthy platform loads a file at
+        # least every ~30 days: warn after 45 days without a successful load, error after 75.
+        config:
+          loaded_at_field: finished_at
+          freshness:
+            warn_after: {count: 45, period: day}
+            error_after: {count: 75, period: day}
+            filter: "status = 'loaded' and dataset = 'yellow'"

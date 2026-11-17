@@ -1,0 +1,13 @@
+# Connection settings come from the environment (see .env.example); no secret is stored here.
+nyc_taxi:
+  target: dev
+  outputs:
+    dev:
+      type: postgres
+      host: "{{ env_var('DBT_HOST') }}"
+      port: "{{ env_var('DBT_PORT', '5432') | int }}"
+      dbname: "{{ env_var('DBT_DATABASE') }}"
+      user: "{{ env_var('DBT_USER') }}"
+      password: "{{ env_var('DBT_PASSWORD') }}"
+      schema: silver
+      threads: "{{ env_var('DBT_THREADS', '2') | int }}"
