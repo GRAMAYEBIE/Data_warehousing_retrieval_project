@@ -703,8 +703,10 @@ next build.
 
 **Scheduling and overlap**: cron `0 6 3 * *` (3rd of the month) set by `PIPELINE_SCHEDULE`;
 empty means manual runs only (used while historical months are loaded). `max_active_runs=1`
-so two monthly runs never overlap, `max_active_tasks=2` and dbt with one thread to fit the
-development machine, `catchup=False`, `dagrun_timeout` 6 hours.
+so two monthly runs never overlap, one task at a time (`PIPELINE_MAX_ACTIVE_TASKS`, raise it
+on a larger host) and dbt with one thread to fit the development machine, `catchup=False`,
+`dagrun_timeout` 6 hours. Heartbeat and import timeouts are raised for a slow host (see the
+infrastructure failure in `docs/evidence/q05/README.md`).
 
 **Backfill and safe re-run**: trigger with `{"month": "2025-03"}` for any month, or
 `{"month": "2025-03", "force": true}` to reload a file even if it did not change. Every
@@ -726,6 +728,7 @@ tasks and publication, 4 spaced 6 hours apart for the source check.
 | `first_run_2025_01` | First task timed out reaching the Airflow API (machine under load) | `failed`: every downstream task stopped, nothing published, failure recorded and reported |
 | `run_2025_01_attempt2` | Full run; `measure_signals` failed on a time-zone bug, was fixed, retried and cleared | `published`: 69/69 dbt tests passed, 5 signals ok, 14 tables published; dbt not redone after the failure |
 | `rerun_2025_01_nothing_new` | Same month again | `nothing_new` in 1 min 21 s: file unchanged, 48 build tasks skipped |
+| `load_2025_02` | New month; PostgreSQL crashed during the silver build on a saturated host | February in bronze; silver, gold and `analytics` unchanged; the gate held |
 
 ### Operational signals (Q5.4)
 

@@ -57,6 +57,43 @@ bronze. `anything_to_publish`: every loaded batch is already in the last publica
 the 48 build tasks were skipped. Outcome: `nothing_new`, 1 minute 21 seconds, no data
 changed anywhere.
 
+## Infrastructure failure during a build: `load_2025_02`
+
+February 2025 was loaded through Airflow: `check_source`, `land_to_rustfs` (93 s) and
+`load_bronze` (342 s, 3,577,543 rows) succeeded. The silver build then failed three times:
+
+1. Attempt 1 was rescheduled: the task worker needed more than 30 s to import the DAG
+   file on the saturated host (`DagBag import timeout`).
+2. Attempt 2 was stopped after 50 minutes: the scheduler heartbeat stalled for 137 s and
+   the running task was considered lost (`task_instance_heartbeat_timeout` 300 s).
+3. Attempt 3 failed when a PostgreSQL backend exited (code 2, no error message) and the
+   server restarted to recover (`the database system is in recovery mode`). At that
+   moment the Windows host had 0.43 GB of free memory out of 7.9 GB, CPU at 98 %.
+
+What the platform did: every write of the build is in a transaction, so nothing partial
+was kept. After the failure, bronze held February, silver and gold still held only
+December and January, and `analytics` still showed the January publication
+(`run_2025_01_attempt2`): users never saw an incomplete state.
+
+Changes made after this incident:
+
+| Setting | Before | After |
+|---|---|---|
+| Pipeline tasks at the same time | 2 | 1 (`PIPELINE_MAX_ACTIVE_TASKS`) |
+| `AIRFLOW__CORE__DAGBAG_IMPORT_TIMEOUT` | 30 s | 120 s |
+| `AIRFLOW__SCHEDULER__TASK_INSTANCE_HEARTBEAT_TIMEOUT` | 300 s | 1200 s |
+| `AIRFLOW__SCHEDULER__SCHEDULER_HEALTH_CHECK_THRESHOLD` | 30 s | 120 s |
+| Silver build memory | `work_mem` 128 MB, 2 parallel workers | 64 MB, 1 parallel worker |
+
+The same run also showed an ordering defect: the reconciliation test read the manifest
+source and the silver models, and Cosmos attached it to the source, so it ran before
+silver contained February and failed. The test now reads `recon_bronze_silver` only, so
+it runs after silver is built (same check, right moment).
+
+Conclusion: the full pipeline needs more resources than the 4 GB Docker share of an
+8 GB laptop when other applications are open. Historical months are better loaded on a
+larger machine (or with other applications closed); the code does not change.
+
 ## Failure mode: `first_run_2025_01`
 
 The first task could not reach the Airflow execution API within 5 seconds while the DAG

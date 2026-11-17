@@ -164,7 +164,9 @@ with DAG(
     start_date=datetime(2026, 11, 1),
     catchup=False,
     max_active_runs=1,
-    max_active_tasks=2,  # 4 GB of memory for the whole platform on the development machine
+    # One task at a time on the 4-CPU / 4 GB development machine: two heavy dbt tasks in
+    # parallel slowed each other until Airflow heartbeats stalled. Raise on a larger host.
+    max_active_tasks=int(os.environ.get("PIPELINE_MAX_ACTIVE_TASKS", "1")),
     dagrun_timeout=timedelta(hours=6),
     default_args=default_args,
     params={
