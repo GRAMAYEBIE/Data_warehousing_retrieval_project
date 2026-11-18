@@ -167,7 +167,7 @@ with DAG(
     # One task at a time on the 4-CPU / 4 GB development machine: two heavy dbt tasks in
     # parallel slowed each other until Airflow heartbeats stalled. Raise on a larger host.
     max_active_tasks=int(os.environ.get("PIPELINE_MAX_ACTIVE_TASKS", "1")),
-    dagrun_timeout=timedelta(hours=6),
+    dagrun_timeout=timedelta(hours=12),
     default_args=default_args,
     params={
         "month": Param(
@@ -236,12 +236,15 @@ with DAG(
             source_rendering_behavior=SourceRenderingBehavior.WITH_TESTS_OR_FRESHNESS,
         ),
         operator_args={
-            # dbt packages are installed once by airflow-init; each task copies them
-            # instead of downloading them again.
+            # dbt packages are installed in the image (DBT_PACKAGES_INSTALL_PATH) and read
+            # in place: no download and no copy before each task (the copy from the mounted
+            # project took about two minutes per task).
+            # Falls back to copying when the image does not provide the packages.
             "install_deps": False,
-            "copy_dbt_packages": True,
+            "copy_dbt_packages": not os.environ.get("DBT_PACKAGES_INSTALL_PATH"),
             "callback": record_dbt_results,
-            "execution_timeout": timedelta(hours=2),
+            # A two-month fct_trip rebuild exceeded 2 hours on the development host.
+            "execution_timeout": timedelta(hours=4),
             "retries": 1,
         },
     )

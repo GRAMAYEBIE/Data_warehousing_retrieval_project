@@ -10,6 +10,11 @@ seed-paths: ["seeds"]
 
 clean-targets: ["target", "dbt_packages"]
 
+# Airflow installs the packages once in its image (/opt/dbt_packages) and points dbt there:
+# copying them from the mounted project folder before each Cosmos task took about two
+# minutes per task. Outside Airflow the default local folder is used.
+packages-install-path: "{{ env_var('DBT_PACKAGES_INSTALL_PATH', 'dbt_packages') }}"
+
 vars:
   # Quality thresholds (see macros/quality_flags.sql for the flag catalogue).
   cross_month_tolerance_days: 3
@@ -42,21 +47,32 @@ models:
     marts:
       +schema: gold
       +materialized: table
+    semantic:
+      +schema: gold
 
 seeds:
   nyc_taxi:
     +schema: silver
 
-# Tests of the two largest tables check only the months rebuilt by the latest build.
-# Every row inserted by one build shares the same load timestamp (one transaction), so
-# the first build is tested in full and a monthly run tests the months it rebuilt, not
-# the whole history: about 12 minutes saved per run for two months, more with thirteen.
+# Tests of the two largest tables check the latest loaded month and the month before it:
+# the months a monthly run rebuilds (a new month also re-evaluates its neighbour for
+# cross-month duplicates). The bound comes from the small ingestion manifest and matches
+# the leading column of an index, so a test reads two months instead of the history.
+# (A first version compared a load timestamp with max() over the whole table, without
+# index, in every test: the fct_trip tests took more than an hour and a half.)
 # Uniqueness across months holds by construction (the key starts with the source month).
+# A backfill of an older month is tested by running dbt test without these filters.
 data_tests:
   nyc_taxi:
+    # fct_trip keys depend only on the month itself (the neighbour is rebuilt for
+    # cross-month duplicates, which are tested in silver): test the latest month only.
     marts:
       fact:
-        +where: "gold_loaded_at = (select max(gold_loaded_at) from gold.fct_trip)"
+        +where: >-
+          source_month = (select max(source_month) from ops.ingestion_manifest
+          where dataset = 'yellow' and status = 'loaded')
     intermediate:
       trips:
-        +where: "silver_loaded_at = (select max(silver_loaded_at) from silver.trips)"
+        +where: >-
+          source_month >= (select max(source_month) from ops.ingestion_manifest
+          where dataset = 'yellow' and status = 'loaded') - interval '1 month'

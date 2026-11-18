@@ -1,0 +1,406 @@
+version: 2
+
+# Governed metrics: the single source of truth (exam Q6).
+#
+# MetricFlow computes each metric on gold.fct_trip. The same definition is also given as
+# meta.sql_expression, an aggregate expression over the published tables of `analytics`
+# (sums and counts only). Superset datasets and the AI assistant copy that expression
+# from this file; tests/consistency checks that both computations give the same value.
+#
+# Approved metrics count valid trips only (quality_status = 'valid'), except
+# valid_trip_rate, which compares valid trips with all trips.
+
+metrics:
+  # ===================================================================================
+  # The twelve governed metrics required by the exam
+  # ===================================================================================
+  - name: trips
+    label: Trips
+    description: Number of completed valid trips.
+    type: simple
+    type_params:
+      measure: trip_count
+    filter: "{{ Dimension('trip__quality_status') }} = 'valid'"
+    config:
+      meta: &meta_default
+        owner: AYEBIE GRAM MESCHAC (Data Team)
+        grains: [day, week, month]
+        base_table: analytics.agg_trips_daily
+        sql_expression: "sum(trip_count) filter (where quality_status = 'valid')"
+        unit: trips
+        filters: valid trips only
+        is_estimate: false
+
+  - name: total_revenue
+    label: Total revenue
+    description: >
+      Sum of total_amount of valid trips (USD). Includes the metered fare, extras, MTA
+      tax, tolls, improvement surcharge, NYS congestion surcharge, airport fee, CBD
+      congestion fee and recorded tips. Cash tips are not recorded by the meter.
+    type: simple
+    type_params:
+      measure: total_amount_sum
+    filter: "{{ Dimension('trip__quality_status') }} = 'valid'"
+    config:
+      meta:
+        <<: *meta_default
+        sql_expression: "sum(sum_total_amount) filter (where quality_status = 'valid')"
+        unit: USD
+
+  - name: avg_fare
+    label: Average fare
+    description: Average metered fare of valid trips (USD), tolls, surcharges and tips excluded.
+    type: ratio
+    type_params:
+      numerator: fare_amount_valid
+      denominator: trips
+    config:
+      meta:
+        <<: *meta_default
+        sql_expression: >-
+          sum(sum_fare_amount) filter (where quality_status = 'valid')
+          / nullif(sum(trip_count) filter (where quality_status = 'valid'), 0)
+        unit: USD per trip
+
+  - name: avg_tip
+    label: Average tip (card trips)
+    description: >
+      Average tip of valid card trips (USD). Card trips only: cash tips are not recorded,
+      so an average over all trips would understate tipping.
+    type: ratio
+    type_params:
+      numerator: tip_amount_card
+      denominator: card_trips
+    config:
+      meta:
+        <<: *meta_default
+        sql_expression: >-
+          sum(sum_tip_amount_recorded) filter (where quality_status = 'valid')
+          / nullif(sum(tip_recorded_trip_count) filter (where quality_status = 'valid'), 0)
+        unit: USD per card trip
+        filters: valid trips paid by card only
+
+  - name: tip_rate
+    label: Tip rate (card trips)
+    description: Tips divided by metered fare, valid card trips only.
+    type: ratio
+    type_params:
+      numerator: tip_amount_card
+      denominator: fare_amount_card
+    config:
+      meta:
+        <<: *meta_default
+        sql_expression: >-
+          sum(sum_tip_amount_recorded) filter (where quality_status = 'valid')
+          / nullif(sum(sum_fare_amount_tip_recorded) filter (where quality_status = 'valid'), 0)
+        unit: ratio
+        filters: valid trips paid by card only
+
+  - name: avg_distance
+    label: Average distance
+    description: Average trip distance of valid trips (miles), as reported by the taximeter.
+    type: ratio
+    type_params:
+      numerator: trip_distance_valid
+      denominator: trips
+    config:
+      meta:
+        <<: *meta_default
+        sql_expression: >-
+          sum(sum_trip_distance) filter (where quality_status = 'valid')
+          / nullif(sum(trip_count) filter (where quality_status = 'valid'), 0)
+        unit: miles per trip
+
+  - name: avg_duration
+    label: Average duration
+    description: Average time between pickup and dropoff of valid trips (minutes).
+    type: ratio
+    type_params:
+      numerator: duration_min_valid
+      denominator: trips
+    config:
+      meta:
+        <<: *meta_default
+        sql_expression: >-
+          sum(sum_duration_min) filter (where quality_status = 'valid')
+          / nullif(sum(trip_count) filter (where quality_status = 'valid'), 0)
+        unit: minutes per trip
+
+  - name: revenue_per_mile
+    label: Revenue per mile
+    description: Total revenue divided by distance, valid trips with a positive distance (USD per mile).
+    type: ratio
+    type_params:
+      numerator: revenue_with_distance
+      denominator: distance_positive
+    config:
+      meta:
+        <<: *meta_default
+        sql_expression: >-
+          sum(sum_total_amount_with_distance) filter (where quality_status = 'valid')
+          / nullif(sum(sum_trip_distance_positive) filter (where quality_status = 'valid'), 0)
+        unit: USD per mile
+        filters: valid trips with a positive distance
+
+  - name: trips_per_active_hour
+    label: Trips per active hour
+    description: >
+      Valid trips divided by the number of distinct pickup hours (date and hour) with at
+      least one valid trip in the selection. A demand-intensity proxy, not a supply measure.
+    type: ratio
+    type_params:
+      numerator: trips
+      denominator: active_hours_valid
+    config:
+      meta:
+        <<: *meta_default
+        grains: [hour, day, week, month]
+        base_table: analytics.agg_trips_hourly
+        sql_expression: >-
+          sum(trip_count) filter (where quality_status = 'valid')
+          / nullif(count(distinct (pickup_date_sk, pickup_hour))
+            filter (where quality_status = 'valid'), 0)
+        unit: trips per active hour
+
+  - name: airport_trips
+    label: Airport trips
+    description: >
+      Valid trips with a pickup or dropoff at Newark (zone 1), JFK (132) or LaGuardia (138),
+      or a JFK / Newark rate code.
+    type: simple
+    type_params:
+      measure: airport_trip_count
+    filter: "{{ Dimension('trip__quality_status') }} = 'valid'"
+    config:
+      meta:
+        <<: *meta_default
+        sql_expression: "sum(airport_trip_count) filter (where quality_status = 'valid')"
+        unit: trips
+
+  - name: congestion_fee_revenue
+    label: Congestion fee revenue (CBD)
+    description: >
+      Sum of the MTA Central Business District congestion fee of valid trips (USD),
+      collected from 2025-01-05. Distinct from the NYS congestion surcharge.
+    type: simple
+    type_params:
+      measure: cbd_congestion_fee_sum
+    filter: "{{ Dimension('trip__quality_status') }} = 'valid'"
+    config:
+      meta:
+        <<: *meta_default
+        sql_expression: "sum(sum_cbd_congestion_fee) filter (where quality_status = 'valid')"
+        unit: USD
+
+  - name: valid_trip_rate
+    label: Valid-trip rate
+    description: >
+      Share of trips with quality status valid among all trips of the selection. The
+      data-quality indicator shown on every dashboard and in every AI answer.
+    type: ratio
+    type_params:
+      numerator: trips
+      denominator: trips_all
+    config:
+      meta:
+        <<: *meta_default
+        sql_expression: >-
+          sum(trip_count) filter (where quality_status = 'valid')
+          / nullif(sum(trip_count), 0)
+        unit: ratio
+        filters: all trips (valid, suspicious and invalid)
+
+  # ===================================================================================
+  # Additional governed metrics
+  # ===================================================================================
+  - name: airport_fee_revenue
+    label: Airport fee revenue
+    description: Sum of the airport fee of valid trips (USD).
+    type: simple
+    type_params:
+      measure: airport_fee_sum
+    filter: "{{ Dimension('trip__quality_status') }} = 'valid'"
+    config:
+      meta:
+        <<: *meta_default
+        sql_expression: "sum(sum_airport_fee) filter (where quality_status = 'valid')"
+        unit: USD
+
+  - name: congestion_surcharge_revenue
+    label: Congestion surcharge revenue (NYS)
+    description: Sum of the New York State congestion surcharge of valid trips (USD).
+    type: simple
+    type_params:
+      measure: congestion_surcharge_sum
+    filter: "{{ Dimension('trip__quality_status') }} = 'valid'"
+    config:
+      meta:
+        <<: *meta_default
+        sql_expression: "sum(sum_congestion_surcharge) filter (where quality_status = 'valid')"
+        unit: USD
+
+  - name: est_co2_kg
+    label: Estimated CO2 (kg) - estimate
+    description: >
+      ESTIMATE, not a measurement. Valid trip distance multiplied by 0.400 kg of CO2 per
+      mile, the US EPA figure for a typical passenger vehicle. Limits: the Yellow fleet
+      includes hybrids (lower emissions), distance driven without a passenger is not in
+      the data (higher emissions), and traffic conditions are ignored.
+    type: derived
+    type_params:
+      expr: trip_distance_valid * 0.400
+      metrics:
+        - trip_distance_valid
+    config:
+      meta:
+        <<: *meta_default
+        sql_expression: "sum(sum_trip_distance) filter (where quality_status = 'valid') * 0.400"
+        unit: kg CO2 (estimate)
+        is_estimate: true
+        source: "US EPA, Greenhouse Gas Emissions from a Typical Passenger Vehicle (about 400 g CO2 per mile)"
+
+  # ===================================================================================
+  # Base metrics: numerators and denominators of the ratios above
+  # ===================================================================================
+  - name: trips_all
+    label: Trips (all statuses)
+    description: Number of trips whatever their quality status. Denominator of valid_trip_rate.
+    type: simple
+    type_params:
+      measure: trip_count
+    config:
+      meta:
+        <<: *meta_default
+        sql_expression: "sum(trip_count)"
+        unit: trips
+        filters: none (valid, suspicious and invalid)
+        role: base
+
+  - name: fare_amount_valid
+    label: Fare amount (valid trips)
+    description: Sum of metered fares of valid trips (USD).
+    type: simple
+    type_params:
+      measure: fare_amount_sum
+    filter: "{{ Dimension('trip__quality_status') }} = 'valid'"
+    config:
+      meta:
+        <<: *meta_default
+        sql_expression: "sum(sum_fare_amount) filter (where quality_status = 'valid')"
+        unit: USD
+        role: base
+
+  - name: trip_distance_valid
+    label: Distance (valid trips)
+    description: Sum of distances of valid trips (miles).
+    type: simple
+    type_params:
+      measure: trip_distance_sum
+    filter: "{{ Dimension('trip__quality_status') }} = 'valid'"
+    config:
+      meta:
+        <<: *meta_default
+        sql_expression: "sum(sum_trip_distance) filter (where quality_status = 'valid')"
+        unit: miles
+        role: base
+
+  - name: duration_min_valid
+    label: Duration (valid trips)
+    description: Sum of durations of valid trips (minutes).
+    type: simple
+    type_params:
+      measure: duration_min_sum
+    filter: "{{ Dimension('trip__quality_status') }} = 'valid'"
+    config:
+      meta:
+        <<: *meta_default
+        sql_expression: "sum(sum_duration_min) filter (where quality_status = 'valid')"
+        unit: minutes
+        role: base
+
+  - name: card_trips
+    label: Card trips (valid)
+    description: Valid trips paid by card.
+    type: simple
+    type_params:
+      measure: tip_recorded_trip_count
+    filter: "{{ Dimension('trip__quality_status') }} = 'valid'"
+    config:
+      meta:
+        <<: *meta_default
+        sql_expression: "sum(tip_recorded_trip_count) filter (where quality_status = 'valid')"
+        unit: trips
+        role: base
+
+  - name: tip_amount_card
+    label: Tips (valid card trips)
+    description: Sum of tips of valid card trips (USD).
+    type: simple
+    type_params:
+      measure: tip_amount_recorded_sum
+    filter: "{{ Dimension('trip__quality_status') }} = 'valid'"
+    config:
+      meta:
+        <<: *meta_default
+        sql_expression: "sum(sum_tip_amount_recorded) filter (where quality_status = 'valid')"
+        unit: USD
+        role: base
+
+  - name: fare_amount_card
+    label: Fare amount (valid card trips)
+    description: Sum of metered fares of valid card trips (USD).
+    type: simple
+    type_params:
+      measure: fare_amount_tip_recorded_sum
+    filter: "{{ Dimension('trip__quality_status') }} = 'valid'"
+    config:
+      meta:
+        <<: *meta_default
+        sql_expression: "sum(sum_fare_amount_tip_recorded) filter (where quality_status = 'valid')"
+        unit: USD
+        role: base
+
+  - name: revenue_with_distance
+    label: Revenue (valid trips with distance)
+    description: Sum of total_amount of valid trips with a positive distance (USD).
+    type: simple
+    type_params:
+      measure: total_amount_with_distance_sum
+    filter: "{{ Dimension('trip__quality_status') }} = 'valid'"
+    config:
+      meta:
+        <<: *meta_default
+        sql_expression: "sum(sum_total_amount_with_distance) filter (where quality_status = 'valid')"
+        unit: USD
+        role: base
+
+  - name: distance_positive
+    label: Positive distance (valid trips)
+    description: Sum of distances of valid trips with a positive distance (miles).
+    type: simple
+    type_params:
+      measure: trip_distance_positive_sum
+    filter: "{{ Dimension('trip__quality_status') }} = 'valid'"
+    config:
+      meta:
+        <<: *meta_default
+        sql_expression: "sum(sum_trip_distance_positive) filter (where quality_status = 'valid')"
+        unit: miles
+        role: base
+
+  - name: active_hours_valid
+    label: Active hours (valid trips)
+    description: Distinct pickup hours with at least one valid trip.
+    type: simple
+    type_params:
+      measure: active_hours
+    filter: "{{ Dimension('trip__quality_status') }} = 'valid'"
+    config:
+      meta:
+        <<: *meta_default
+        grains: [hour, day, week, month]
+        base_table: analytics.agg_trips_hourly
+        sql_expression: >-
+          count(distinct (pickup_date_sk, pickup_hour)) filter (where quality_status = 'valid')
+        unit: hours
+        role: base

@@ -5,10 +5,7 @@
         unique_key="source_month",
         on_schema_change="fail",
         indexes=[
-            {"columns": ["trip_sk"], "unique": true},
             {"columns": ["source_month"]},
-            {"columns": ["pickup_date_sk"]},
-            {"columns": ["pickup_zone_sk"]},
             {"columns": ["pickup_ts"], "type": "brin"},
         ],
     )
@@ -21,11 +18,21 @@
     0-based row number in that file on 8 digits. Trip 20250100001204 is row 1204 of
     yellow_tripdata_2025-01.parquet, in every layer and after every re-run.
 
+    Indexes: only source_month (the incremental delete of a month) and a BRIN on pickup_ts.
+    Nothing reads single trips from this table in production: aggregates scan it and BI
+    and AI read analytics. Three b-tree indexes on 7 million rows (trip_sk, date, zone)
+    made a two-month rebuild exceed two hours on the development host.
+
     Every row of silver is kept, whatever its quality status; approved metrics filter
     on quality_status = 'valid'. Unknown or missing codes point to the Unknown member
     (-1) of their dimension, so every foreign key resolves.
 #}
 {%- set months = months_to_process() %}
+
+-- trip_quality_sk is computed here (hash of the flag list), so no ref() ties this model
+-- to dim_trip_quality. Without this declaration, a new month with new flag combinations
+-- was tested against a dimension not yet rebuilt (relationships test failed, 2025-02).
+-- depends_on: {{ ref("dim_trip_quality") }}
 
 with trips as (
     select t.*

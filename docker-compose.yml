@@ -186,7 +186,6 @@ services:
         set -e
         airflow db migrate
         cd /opt/airflow/dbt
-        /opt/dbt_venv/bin/dbt deps --quiet
         /opt/dbt_venv/bin/dbt parse --quiet
         echo "airflow-init done"
     restart: "no"

@@ -1,0 +1,217 @@
+version: 2
+
+models:
+  - name: metricflow_time_spine
+    description: Daily calendar used by MetricFlow to aggregate metrics by day, week and month.
+    time_spine:
+      standard_granularity_column: date_day
+    columns:
+      - name: date_day
+        description: Calendar day.
+        granularity: day
+        data_tests: [unique, not_null]
+
+semantic_models:
+  # ---------------------------------------------------------------------------------
+  # Trips: the fact table, one row per completed trip. Every governed metric starts here.
+  # ---------------------------------------------------------------------------------
+  - name: trips
+    description: >
+      One row per completed Yellow Taxi trip (gold.fct_trip). Measures are sums and
+      counts; governed metrics apply the quality filter (valid trips only) on top.
+    model: ref('fct_trip')
+    defaults:
+      agg_time_dimension: pickup_date
+    entities:
+      - name: trip
+        type: primary
+        expr: trip_sk
+      - name: pickup_zone
+        type: foreign
+        expr: pickup_zone_sk
+      - name: dropoff_zone
+        type: foreign
+        expr: dropoff_zone_sk
+      - name: payment_type
+        type: foreign
+        expr: payment_type_sk
+      - name: rate_code
+        type: foreign
+        expr: rate_code_sk
+      - name: vendor
+        type: foreign
+        expr: vendor_sk
+      - name: calendar_day
+        type: foreign
+        expr: pickup_date_sk
+    dimensions:
+      - name: pickup_date
+        type: time
+        expr: "date_trunc('day', pickup_ts)"
+        type_params:
+          time_granularity: day
+      - name: pickup_hour
+        type: categorical
+        expr: "extract(hour from pickup_ts)::int"
+      - name: day_of_week
+        type: categorical
+        expr: "extract(isodow from pickup_ts)::int"
+      - name: service_period
+        type: categorical
+        expr: service_period_sk
+      - name: quality_status
+        type: categorical
+      - name: is_airport_trip
+        type: categorical
+      - name: is_tip_recorded
+        type: categorical
+      - name: source_month
+        type: categorical
+    measures:
+      - name: trip_count
+        description: Number of trips.
+        agg: count
+        expr: trip_sk
+      - name: total_amount_sum
+        description: Sum of total_amount (USD), tolls, surcharges, fees and recorded tips included.
+        agg: sum
+        expr: total_amount
+      - name: fare_amount_sum
+        description: Sum of the metered fare (USD).
+        agg: sum
+        expr: fare_amount
+      - name: trip_distance_sum
+        description: Sum of trip distances (miles).
+        agg: sum
+        expr: trip_distance
+      - name: duration_min_sum
+        description: Sum of trip durations (minutes).
+        agg: sum
+        expr: duration_min
+      - name: cbd_congestion_fee_sum
+        description: Sum of the MTA Central Business District congestion fee (USD), from 2025-01-05.
+        agg: sum
+        expr: cbd_congestion_fee
+      - name: congestion_surcharge_sum
+        description: Sum of the New York State congestion surcharge (USD).
+        agg: sum
+        expr: congestion_surcharge
+      - name: airport_fee_sum
+        description: Sum of the airport fee (USD).
+        agg: sum
+        expr: airport_fee
+      - name: airport_trip_count
+        description: Trips with a pickup or dropoff at EWR, JFK or LGA, or an airport rate code.
+        agg: sum
+        expr: "case when is_airport_trip then 1 else 0 end"
+      - name: tip_recorded_trip_count
+        description: Trips paid by card, the only payment type for which tips are recorded.
+        agg: sum
+        expr: "case when is_tip_recorded then 1 else 0 end"
+      - name: tip_amount_recorded_sum
+        description: Sum of tips on card trips (USD).
+        agg: sum
+        expr: "case when is_tip_recorded then tip_amount else 0 end"
+      - name: fare_amount_tip_recorded_sum
+        description: Sum of fares on card trips (USD); denominator of the tip rate.
+        agg: sum
+        expr: "case when is_tip_recorded then fare_amount else 0 end"
+      - name: total_amount_with_distance_sum
+        description: Sum of total_amount on trips with a positive distance (USD).
+        agg: sum
+        expr: "case when trip_distance > 0 then total_amount else 0 end"
+      - name: trip_distance_positive_sum
+        description: Sum of distances on trips with a positive distance (miles).
+        agg: sum
+        expr: "case when trip_distance > 0 then trip_distance else 0 end"
+      - name: active_hours
+        description: Distinct pickup hours (date and hour) with at least one trip.
+        agg: count_distinct
+        expr: "date_trunc('hour', pickup_ts)"
+
+  # ---------------------------------------------------------------------------------
+  # Dimensions joined to trips through their entities.
+  # ---------------------------------------------------------------------------------
+  - name: pickup_zones
+    description: Pickup taxi zone (role-playing view of dim_zone).
+    model: ref('dim_pickup_zone')
+    entities:
+      - name: pickup_zone
+        type: primary
+        expr: pickup_zone_sk
+    dimensions:
+      - name: pickup_borough
+        type: categorical
+      - name: pickup_zone_name
+        type: categorical
+        expr: pickup_zone
+      - name: pickup_market_segment
+        type: categorical
+      - name: is_pickup_airport
+        type: categorical
+
+  - name: dropoff_zones
+    description: Dropoff taxi zone (role-playing view of dim_zone).
+    model: ref('dim_dropoff_zone')
+    entities:
+      - name: dropoff_zone
+        type: primary
+        expr: dropoff_zone_sk
+    dimensions:
+      - name: dropoff_borough
+        type: categorical
+      - name: dropoff_zone_name
+        type: categorical
+        expr: dropoff_zone
+      - name: dropoff_market_segment
+        type: categorical
+      - name: is_dropoff_airport
+        type: categorical
+
+  - name: payment_types
+    description: TLC payment type.
+    model: ref('dim_payment_type')
+    entities:
+      - name: payment_type
+        type: primary
+        expr: payment_type_sk
+    dimensions:
+      - name: payment_type_name
+        type: categorical
+
+  - name: rate_codes
+    description: TLC rate code.
+    model: ref('dim_rate_code')
+    entities:
+      - name: rate_code
+        type: primary
+        expr: rate_code_sk
+    dimensions:
+      - name: rate_code_name
+        type: categorical
+
+  - name: vendors
+    description: Technology provider that reported the trip.
+    model: ref('dim_vendor')
+    entities:
+      - name: vendor
+        type: primary
+        expr: vendor_sk
+    dimensions:
+      - name: vendor_name
+        type: categorical
+
+  - name: calendar_days
+    description: Calendar attributes of the pickup date (weekend, public holiday).
+    model: ref('dim_date')
+    entities:
+      - name: calendar_day
+        type: primary
+        expr: date_sk
+    dimensions:
+      - name: day_type
+        type: categorical
+      - name: is_holiday
+        type: categorical
+      - name: holiday_name
+        type: categorical

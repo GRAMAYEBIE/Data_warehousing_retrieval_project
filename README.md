@@ -21,11 +21,13 @@ that is not implemented yet.
 | 1 | Docker Compose core, warehouse schemas and roles, landing zone, idempotent ingestion, bronze layer, manifest | **Built and verified** |
 | 2 | dbt: silver, quality flags, star schema, aggregates, tests, reconciliation | **Built and verified** (94/94 build steps green on two months) |
 | 3 | Airflow orchestration, publication gate, operational signals | **Built and verified** (successful run, failure and recovery, safe re-run) |
-| 4 | Semantic layer, Superset, six dashboards | Planned |
+| 4 | Semantic layer, Superset, six dashboards | **In progress**: semantic layer and metric catalogue built; Superset next |
 | 5 | AI assistant: API, web interface, evaluation pack | Planned |
 | 6 | Extensions: Prometheus/Grafana, Kafka, MLflow | Planned, optional |
 
-Loaded so far: `2024-12` (3,668,371 rows) and `2025-01` (3,475,226 rows), plus the 265 taxi zones.
+Loaded and published so far: `2024-12` (3,668,371 rows), `2025-01` (3,475,226 rows) and
+`2025-02` (3,577,543 rows, loaded end to end through Airflow), plus the 265 taxi zones.
+Valid-trip rate: 93.65 %, 91.44 % and 90.50 %.
 
 ---
 
@@ -130,9 +132,22 @@ Once dbt files change, refresh the manifest Cosmos reads with
 
 ### Local resources
 
-The development machine has 8 GB of RAM with 4 GB given to Docker. This is enough for the
-core profile. One month takes about 1.2 GB in bronze and 5 to 10 minutes to load. Thirteen
-months are projected at about 15 GB in bronze and 40 to 45 GB with silver and gold.
+The development machine has 8 GB of RAM and 4 CPUs, with 4 GB given to Docker. One month
+takes about 1.2 GB in bronze and 5 to 10 minutes to load. Two months take 2.4 GB in bronze,
+3.2 GB in silver and 2.5 GB in gold; thirteen months are projected at about 15 GB in
+bronze and 40 to 45 GB with silver and gold.
+
+| Profile | Memory used (measured) | Notes |
+|---|---|---|
+| `core` (PostgreSQL, RustFS) | about 0.8 to 1.1 GB | enough for ingestion and dbt alone |
+| `core` + `orchestration` (Airflow) | about 1.7 to 2 GB at rest | dbt builds add PostgreSQL work memory on top |
+
+**On an 8 GB Windows laptop, configure WSL swap.** Without it, the Docker VM had 1 GB of
+swap and PostgreSQL lost a process during a dbt build while Airflow was running (see
+`docs/evidence/q05/README.md`). `infra/wsl/wslconfig.example` keeps 4 GB of RAM for Docker
+and adds 12 GB of swap on a data drive; copy it to `%USERPROFILE%\.wslconfig`, run
+`wsl --shutdown` and restart Docker Desktop. The pipeline also runs one task at a time by
+default (`PIPELINE_MAX_ACTIVE_TASKS=1`). On a larger machine, raise both.
 A demonstration mode (`DEMO_MODE=true`) will limit the platform to one month and a small
 LLM (`qwen2.5:3b`).
 
@@ -530,7 +545,16 @@ exported to `docs/dbt_docs/`; it will also be served in Compose (port 8085).
 
 ---
 
-## 9. Semantic layer and governed metrics (planned, Q6)
+## 9. Semantic layer and governed metrics (Q6)
+
+**Built**: `dbt/models/semantic/_semantic_models.yml` (7 semantic models: trips on
+`fct_trip`, pickup and dropoff zones, payment types, rate codes, vendors, calendar days,
+plus the MetricFlow time spine) and `dbt/models/semantic/_metrics.yml` (15 governed metrics,
+including the 12 required, and 10 base metrics used as numerators and denominators).
+In dbt 1.12 a ratio metric takes metrics, not measures, as numerator and denominator:
+hence the base metrics. The generated catalogue is `docs/metric_catalog.md`
+(`services/metrics_sync/metrics_sync.py markdown`); the same rows go to
+`semantic.metric_catalog` for the AI assistant (`... database`).
 
 Metrics are defined in `dbt/models/semantic/*.yml` (MetricFlow), the **single source of
 truth**. Each metric carries in `meta:` its `owner`, `sql_expression` (an aggregate
@@ -728,7 +752,7 @@ tasks and publication, 4 spaced 6 hours apart for the source check.
 | `first_run_2025_01` | First task timed out reaching the Airflow API (machine under load) | `failed`: every downstream task stopped, nothing published, failure recorded and reported |
 | `run_2025_01_attempt2` | Full run; `measure_signals` failed on a time-zone bug, was fixed, retried and cleared | `published`: 69/69 dbt tests passed, 5 signals ok, 14 tables published; dbt not redone after the failure |
 | `rerun_2025_01_nothing_new` | Same month again | `nothing_new` in 1 min 21 s: file unchanged, 48 build tasks skipped |
-| `load_2025_02` | New month; PostgreSQL crashed during the silver build on a saturated host | February in bronze; silver, gold and `analytics` unchanged; the gate held |
+| `load_2025_02` | New month; PostgreSQL crashed during the silver build on a saturated host, then a relationships test caught a missing dependency (new flag combinations tested before `dim_trip_quality` was rebuilt) | Each time the gate held (`analytics` stayed on January). After the fixes (swap, ordering, dependency) and clearing the failed tasks: `published`, 74/74 tests, 5 signals ok |
 
 ### Operational signals (Q5.4)
 

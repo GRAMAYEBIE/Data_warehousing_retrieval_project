@@ -1,0 +1,17 @@
+# WSL 2 settings for Docker Desktop on Windows, for hosts with 8 GB of RAM.
+# Copy to %USERPROFILE%\.wslconfig, then run `wsl --shutdown` and restart Docker Desktop
+# (stop the platform first: docker compose --profile core --profile orchestration stop).
+#
+# Why: during dbt builds the Docker VM ran out of memory and PostgreSQL lost a process.
+# Docker keeps 4 GB of RAM (Windows needs the rest); 12 GB of swap on a data drive
+# absorbs peaks, so the system slows down instead of killing a process.
+# Adjust swapFile to a drive with free space (it grows up to the swap size).
+[wsl2]
+memory=4GB
+processors=4
+swap=12GB
+swapFile=E:\\wsl\\swap.vhdx
+
+[experimental]
+# Give memory used as file cache back to Windows progressively.
+autoMemoryReclaim=gradual

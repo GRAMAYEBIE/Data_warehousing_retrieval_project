@@ -9,9 +9,6 @@
             {"columns": ["source_month", "file_row_number"], "unique": true},
             {"columns": ["pickup_ts"], "type": "brin"},
         ],
-        # Bounded memory: each sort or hash may use work_mem, in every parallel worker.
-        # 128 MB with two workers contributed to a PostgreSQL backend crash on the
-        # 4 GB development host while Airflow was running (see docs/evidence/q05).
         pre_hook=[
             "set work_mem = '64MB'",
             "set max_parallel_workers_per_gather = 1",
@@ -20,6 +17,10 @@
 }}
 
 {#
+    Memory of the pre_hook: each sort or hash may use work_mem, in every parallel worker.
+    128 MB with two workers contributed to a PostgreSQL backend crash on the 4 GB
+    development host while Airflow was running (see docs/evidence/q05).
+
     Silver trips: one row per bronze row that could be parsed, with derived fields,
     one boolean per quality flag, the flag list and the quality status.
 
