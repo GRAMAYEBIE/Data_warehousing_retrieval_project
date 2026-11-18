@@ -158,7 +158,7 @@ metrics:
         base_table: analytics.agg_trips_hourly
         sql_expression: >-
           sum(trip_count) filter (where quality_status = 'valid')
-          / nullif(count(distinct (pickup_date_sk, pickup_hour))
+          / nullif(count(distinct pickup_date_sk * 100 + pickup_hour)
             filter (where quality_status = 'valid'), 0)
         unit: trips per active hour
 
@@ -401,6 +401,6 @@ metrics:
         grains: [hour, day, week, month]
         base_table: analytics.agg_trips_hourly
         sql_expression: >-
-          count(distinct (pickup_date_sk, pickup_hour)) filter (where quality_status = 'valid')
+          count(distinct pickup_date_sk * 100 + pickup_hour) filter (where quality_status = 'valid')
         unit: hours
         role: base

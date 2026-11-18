@@ -691,7 +691,27 @@ specific fix are documented.
 
 1. **Prometheus + Grafana** (profile `obs`): Airflow (StatsD), postgres_exporter, FastAPI; alerts on failed run, freshness and rejection rate.
 2. **Kafka KRaft + Schema Registry** (profile `stream`): `trips.raw` replays a Parquet file to simulate the current month; the consumer writes `bronze.yellow_trips_stream` (`is_provisional = true`), **excluded from `fct_trip` and from metrics**, purged when the official file arrives.
-3. **MLflow + demand forecast** by zone × hour (profile `ml`): LightGBM (calendar, holidays, lags) against a naive seasonal baseline; forecasts → `ml.demand_forecast` → Dashboard 2.
+3. **MLflow + demand forecast** by zone × hour (profile `ml`): LightGBM (calendar, holidays, lags) against a naive seasonal baseline; forecasts → `ml.demand_forecast` → Dashboard 2. MLflow tracks every training run (parameters, data version = published batches, metrics, model artefact in RustFS), so a forecast can be traced to the data and code that produced it.
+
+### Machine learning: the data is heavily imbalanced, so the method must be careful
+
+Measured on the loaded months, the data is skewed in every direction that matters for ML:
+
+| Imbalance | Measured | Risk if ignored |
+|---|---|---|
+| Quality classes | about 91 % valid, 5 % suspicious, 4 % invalid | a classifier of "bad" trips scores 91 % accuracy by predicting "valid" for everything |
+| Payment types | 70 % card, 11 % cash, 15 % not reported | tip models learn the card population only |
+| Geography | demand concentrated in Manhattan and the airports; many outer-borough zones have few or zero trips per hour | a demand model fits Manhattan and is meaningless elsewhere; zero-inflated targets |
+| Time | strong hour-of-day and weekday cycles, holidays, a new CBD fee from 2025-01-05 | random splits leak the future into training |
+
+Rules for any model in this project:
+
+1. **Time-based splits only** (train on past months, validate on the next ones). Never a random split of trips.
+2. **Baseline first**: every model is compared with a seasonal naive forecast (same hour, same weekday, previous weeks). A model that does not beat it is not published.
+3. **Metrics that respect the imbalance**: for demand counts, MAE and WMAPE (MAPE is undefined on zero-trip hours), reported per borough and per demand band, not only overall. For rare-class detection (anomalies, invalid trips), precision-recall AUC, precision at k and recall per class, never accuracy alone.
+4. **Imbalance handled explicitly**: class weights or threshold tuning on a validation month for classifiers; for zones, either a model per demand tier or a pooled model with zone features, with sparse zones evaluated separately and flagged as low-confidence.
+5. **Scope stated honestly**: trip volume is a proxy for demand (unserved demand is invisible), so a forecast predicts recorded trips, not need. Predictions carry an interval and the month range they were trained on.
+6. **Minimum history**: at least six consecutive months before any forecast is shown, so that weekly seasonality and a holiday period are in the training data.
 
 ---
 

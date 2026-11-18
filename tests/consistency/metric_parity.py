@@ -48,10 +48,14 @@ def metricflow_values() -> dict[tuple[str, date], Decimal]:
     with tempfile.TemporaryDirectory() as tmp:
         out = Path(tmp) / "mf.csv"
         cmd = [
-            "mf", "query",
-            "--metrics", ",".join(METRICS),
-            "--group-by", "metric_time__month",
-            "--csv", str(out),
+            "mf",
+            "query",
+            "--metrics",
+            ",".join(METRICS),
+            "--group-by",
+            "metric_time__month",
+            "--csv",
+            str(out),
         ]
         result = subprocess.run(cmd, cwd=PROJECT_DIR, capture_output=True, text=True)
         if result.returncode != 0 or not out.exists():
@@ -83,8 +87,8 @@ def published_values(
             entry = catalog[metric]
             cur.execute(
                 f"""
-                SELECT d.month_start, {entry['sql_expression']}
-                FROM {entry['base_table']} AS a
+                SELECT d.month_start, {entry["sql_expression"]}
+                FROM {entry["base_table"]} AS a
                 JOIN analytics.dim_date AS d ON a.pickup_date_sk = d.date_sk
                 WHERE d.month_start IS NOT NULL
                 GROUP BY d.month_start
@@ -104,6 +108,25 @@ def load_catalog() -> dict[str, dict]:
     return {m["name"]: m["config"]["meta"] for m in manifest["metrics"]}
 
 
+def fmt(value: Decimal | None) -> str:
+    return "-" if value is None else f"{value:,.6f}".rstrip("0").rstrip(".")
+
+
+def loaded_source_months() -> set[date]:
+    """Months whose source file is loaded (complete months)."""
+    conn = psycopg2.connect(
+        host=os.environ.get("DBT_HOST", "postgres"),
+        dbname=os.environ.get("DBT_DATABASE", "warehouse"),
+        user="ai_reader",
+        password=os.environ["AI_READER_PASSWORD"],
+    )
+    with conn, conn.cursor() as cur:
+        cur.execute("SELECT source_month FROM analytics.recon_bronze_silver")
+        months = {row[0] for row in cur.fetchall()}
+    conn.close()
+    return months
+
+
 def same(a: Decimal, b: Decimal) -> bool:
     if a == b:
         return True
@@ -117,13 +140,20 @@ def main() -> int:
     published, publication = published_values(catalog)
     months = sorted({month for (_, month) in published})
 
+    loaded = loaded_source_months()
     rows, mismatches = [], 0
     for month in months:
         for metric in METRICS:
             a, b = mf.get((metric, month)), published.get((metric, month))
-            ok = a is not None and b is not None and same(a, b)
+            if a is None and b is None:
+                # Both surfaces agree there is no value (e.g. the CBD fee before 2025-01).
+                ok, result = True, "match (no value on either surface)"
+            else:
+                ok = a is not None and b is not None and same(a, b)
+                result = "match" if ok else "MISMATCH"
             mismatches += not ok
-            rows.append((month, metric, a, b, "match" if ok else "MISMATCH"))
+            label = f"{month:%Y-%m}" + ("" if month in loaded else " (partial)")
+            rows.append((label, metric, a, b, result))
 
     lines = [
         "# Metric parity: same metric, same value on every surface (Q6.4)",
@@ -140,16 +170,20 @@ def main() -> int:
         f"Tolerance: relative difference at most {RELATIVE_TOLERANCE}. "
         f"Result: **{len(rows) - mismatches} of {len(rows)} values match**.",
         "",
+        "Months marked *partial* have no source file loaded: they only hold valid trips",
+        "picked up a few hours before or after a loaded month (cross-month rows, counted",
+        "on their real pickup date). Dashboards and the AI assistant show complete months",
+        "only; the rows are kept here to prove both surfaces treat them identically.",
+        "",
         "| Pickup month | Metric | dbt / MetricFlow | Published SQL | Result |",
         "|---|---|---|---|---|",
     ]
-    for month, metric, a, b, result in rows:
-        fmt = (lambda v: "-" if v is None else f"{v:,.6f}".rstrip("0").rstrip("."))
-        lines.append(f"| {month:%Y-%m} | `{metric}` | {fmt(a)} | {fmt(b)} | {result} |")
+    for label, metric, a, b, result in rows:
+        lines.append(f"| {label} | `{metric}` | {fmt(a)} | {fmt(b)} | {result} |")
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
     OUTPUT.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
-    print("\n".join(lines[-len(rows) - 2:]))
+    print("\n".join(lines[-len(rows) - 2 :]))
     print(f"\n{len(rows) - mismatches}/{len(rows)} match -> {OUTPUT}")
     return 1 if mismatches else 0
 
