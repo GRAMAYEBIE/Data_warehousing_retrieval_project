@@ -21,7 +21,7 @@ that is not implemented yet.
 | 1 | Docker Compose core, warehouse schemas and roles, landing zone, idempotent ingestion, bronze layer, manifest | **Built and verified** |
 | 2 | dbt: silver, quality flags, star schema, aggregates, tests, reconciliation | **Built and verified** (94/94 build steps green on two months) |
 | 3 | Airflow orchestration, publication gate, operational signals | **Built and verified** (successful run, failure and recovery, safe re-run) |
-| 4 | Semantic layer, Superset, six dashboards | **In progress**: semantic layer and metric catalogue built; Superset next |
+| 4 | Semantic layer, Superset, six dashboards | **Built**: semantic layer, metric parity (40/40), Superset with 7 certified datasets and 6 dashboards (51 charts, each verified to return data); visual review and the Superset parity surface pending |
 | 5 | AI assistant: API, web interface, evaluation pack | Planned |
 | 6 | Extensions: Prometheus/Grafana, Kafka, MLflow | Planned, optional |
 
@@ -594,7 +594,43 @@ consistency test.
 
 ---
 
-## 10. Superset and the six dashboards (planned, Q7 and Q13)
+## 10. Superset and the six dashboards (Q7 and Q13)
+
+**Built, as code** (nothing is configured by hand in the UI):
+
+```bash
+docker compose --profile core --profile bi up -d       # Superset on http://localhost:8088
+# certified datasets, governed metrics, Manhattan role and RLS (idempotent)
+docker compose --profile core --profile tools run --rm -e SUPERSET_URL=http://superset:8088 \
+  -e SUPERSET_ADMIN_PASSWORD -e SUPERSET_READER_PASSWORD -v "$PWD:/repo" -w /repo \
+  --entrypoint python ingestion services/metrics_sync/superset_sync.py
+# the six dashboards; every chart's query is run and must return without error
+docker compose --profile core --profile tools run --rm -e SUPERSET_URL=http://superset:8088 \
+  -e SUPERSET_ADMIN_PASSWORD -e SUPERSET_READER_PASSWORD -v "$PWD:/repo" \
+  -w /repo/services/metrics_sync --entrypoint python ingestion dashboards.py
+```
+
+- `infra/superset/`: image (official 6.1.0 plus the PostgreSQL driver), configuration
+  (Redis caches, one MetroMove colour palette, cross filters, dashboard RBAC).
+- `services/metrics_sync/superset_sync.py`: the read-only database connection
+  (`superset_reader`, `analytics` only), seven certified virtual datasets limited to
+  complete months, and on each dataset every governed metric whose expression only uses
+  its columns (23 on `trips_daily`, 11 on `trips_hourly`, 15 on `routes_monthly`), copied
+  from the dbt YAML. The quality dataset gets one share per status and flag (18),
+  generated from its columns. Role `Analyst Manhattan` with a row-level security rule.
+- `services/metrics_sync/dashboards.py`: six dashboards, 51 charts of 14 kinds (trend
+  KPIs, dual-axis bars and line, rolling mean, heatmap, origin-destination matrix,
+  bubble chart, treemap, rankings, tables). Every chart description states the strategic
+  question it answers. Every dashboard has a header with its question, a data-quality
+  tile, a "last refreshed" tile, date and borough filters, cross filters, and a "So what?"
+  block computed from the published tables at build time and dated with the publication.
+  Borough colours are fixed across dashboards.
+- Superset's web worker timeout is raised to 300 s: with the default 60 s, the single
+  worker was killed while loading during a dbt build.
+
+**Memory**: Superset and an Airflow build do not fit together in 4 GB (6 GB of swap used,
+requests above 5 minutes). On the development machine, data loading and dashboard work
+are done at different times; on a 16 GB host they can run together.
 
 Superset with Redis (cache), connected with `superset_reader` to the `analytics` schema
 only. **Certified** datasets, row-level security by role (for example `analyst_manhattan`
@@ -799,7 +835,8 @@ every run. All signals are published to `analytics` for Dashboard 5.
 | airflow-init (one-shot: database migration, dbt manifest) | – | orchestration | built |
 | airflow (api-server, scheduler, dag-processor) | 8080 | orchestration | built |
 | dbt-docs | 8085 | core | planned |
-| superset + redis | 8088 | bi | planned |
+| superset-init (one-shot: database upgrade, admin, roles) | – | bi | built |
+| superset 6.1.0 + redis | 8088 | bi | built |
 | ollama | 11434 | ai | planned |
 | api (FastAPI) | 8000 | ai | planned |
 | web (React, nginx) | 3000 | ai | planned |
