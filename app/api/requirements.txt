@@ -1,0 +1,9 @@
+# Pinned dependencies of the AI assistant API.
+fastapi==0.118.0
+uvicorn[standard]==0.37.0
+pydantic==2.11.9
+psycopg[binary]==3.2.10
+sqlglot==27.20.0
+httpx==0.28.1
+pytest==8.4.2
+ruff==0.13.3

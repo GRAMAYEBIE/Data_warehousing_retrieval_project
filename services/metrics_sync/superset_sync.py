@@ -387,6 +387,29 @@ def ensure_rls(api: Superset, datasets: list[dict]) -> str:
     return f"role {role_id}, {len(table_ids)} datasets"
 
 
+def ensure_ai_builder(api: Superset, password: str) -> str:
+    """Service account of the AI assistant: role Alpha (creates charts and dashboards; cannot
+    manage users, roles or database connections). Its drafts are published only after a
+    manager confirms in the assistant."""
+    alpha = api.find("security/roles", "name", "Alpha")
+    if not alpha:
+        raise RuntimeError("Superset role Alpha not found (run superset init)")
+    body = {
+        "active": True,
+        "email": "ai_builder@example.org",
+        "first_name": "AI",
+        "last_name": "Report builder",
+        "username": "ai_builder",
+        "roles": [alpha["id"]],
+    }
+    existing = api.find("security/users", "username", "ai_builder")
+    if existing:
+        api.call("PUT", f"/api/v1/security/users/{existing['id']}", json=body | {"password": password})
+        return f"ai_builder updated (id {existing['id']}, role Alpha)"
+    created = api.call("POST", "/api/v1/security/users/", json=body | {"password": password})
+    return f"ai_builder created (id {created.get('id')}, role Alpha)"
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--manifest", type=Path, default=Path("dbt/target/semantic_manifest.json"))
@@ -408,6 +431,8 @@ def main(argv: list[str] | None = None) -> int:
             f"{', '.join(result['metrics'])}"
         )
     print("row-level security:", ensure_rls(api, datasets))
+    if os.environ.get("SUPERSET_AI_PASSWORD"):
+        print("service account:", ensure_ai_builder(api, os.environ["SUPERSET_AI_PASSWORD"]))
     return 0
 
 
