@@ -1,0 +1,54 @@
+// Grafana Alloy: collects the logs of every container of the platform and sends them to
+// Loki, labelled by container and Compose service. The trace id written by the assistant
+// ("trace_id=<32 hex>") is kept as structured metadata, so a log line opens its trace.
+
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+}
+
+discovery.relabel "containers" {
+  targets = discovery.docker.containers.targets
+
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "container"
+  }
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "service"
+  }
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
+    target_label  = "project"
+  }
+}
+
+loki.source.docker "containers" {
+  host          = "unix:///var/run/docker.sock"
+  targets       = discovery.relabel.containers.output
+  relabel_rules = discovery.relabel.containers.rules
+  forward_to    = [loki.process.platform.receiver]
+}
+
+loki.process "platform" {
+  stage.regex {
+    expression = "trace_id=(?P<trace_id>[0-9a-f]{32})"
+  }
+  stage.regex {
+    expression = "(?P<level>ERROR|WARNING|CRITICAL)"
+  }
+  stage.structured_metadata {
+    values = { trace_id = "" }
+  }
+  stage.labels {
+    values = { level = "" }
+  }
+  forward_to = [loki.write.local.receiver]
+}
+
+loki.write "local" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}

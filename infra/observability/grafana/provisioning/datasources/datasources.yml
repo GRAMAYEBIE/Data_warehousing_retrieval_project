@@ -1,0 +1,68 @@
+# Grafana data sources as code. They are linked to each other so that one click goes from
+# a metric to its logs or its trace, and from a log line to its trace:
+#   Prometheus exemplar -> Tempo trace -> Loki logs of the same trace -> back to the trace.
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    uid: prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    jsonData:
+      timeInterval: 30s
+      exemplarTraceIdDestinations:
+        - name: trace_id
+          datasourceUid: tempo
+
+  - name: Loki
+    uid: loki
+    type: loki
+    access: proxy
+    url: http://loki:3100
+    jsonData:
+      maxLines: 1000
+      derivedFields:
+        - name: trace
+          matcherType: regex
+          matcherRegex: "trace_id=([0-9a-f]{32})"
+          datasourceUid: tempo
+          url: "$${__value.raw}"
+          urlDisplayLabel: Open the trace
+
+  - name: Tempo
+    uid: tempo
+    type: tempo
+    access: proxy
+    url: http://tempo:3200
+    jsonData:
+      tracesToLogsV2:
+        datasourceUid: loki
+        filterByTraceID: true
+        spanStartTimeShift: "-5m"
+        spanEndTimeShift: "5m"
+        customQuery: true
+        query: '{service="api"} |= "$${__trace.traceId}"'
+      tracesToMetrics:
+        datasourceUid: prometheus
+      serviceMap:
+        datasourceUid: prometheus
+      nodeGraph:
+        enabled: true
+
+  # Operational state of the platform, read-only (role metrics_reader: database statistics
+  # and the ops tables, never trips or business aggregates).
+  - name: Warehouse (ops, read-only)
+    uid: warehouse
+    type: grafana-postgresql-datasource
+    access: proxy
+    url: postgres:5432
+    user: metrics_reader
+    jsonData:
+      database: $POSTGRES_DB
+      sslmode: disable
+      postgresVersion: 1600
+      maxOpenConns: 4
+    secureJsonData:
+      password: $METRICS_READER_PASSWORD

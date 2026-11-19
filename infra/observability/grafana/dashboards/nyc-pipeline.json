@@ -1,0 +1,451 @@
+{
+ "uid": "nyc-pipeline",
+ "title": "1. Pipeline: runs, tasks, tests",
+ "description": "Monthly runs from the operational tables, task durations from Airflow, dbt tests of the last run.",
+ "tags": [
+  "nyc-taxi",
+  "pipeline"
+ ],
+ "timezone": "browser",
+ "schemaVersion": 41,
+ "version": 1,
+ "editable": false,
+ "graphTooltip": 1,
+ "refresh": "1m",
+ "time": {
+  "from": "now-24h",
+  "to": "now"
+ },
+ "links": [
+  {
+   "title": "Overview",
+   "type": "link",
+   "url": "/d/nyc-overview",
+   "targetBlank": false,
+   "icon": "dashboard"
+  },
+  {
+   "title": "Data quality",
+   "type": "link",
+   "url": "/d/nyc-quality",
+   "targetBlank": false,
+   "icon": "dashboard"
+  },
+  {
+   "title": "Infrastructure",
+   "type": "link",
+   "url": "/d/nyc-infrastructure",
+   "targetBlank": false,
+   "icon": "dashboard"
+  },
+  {
+   "title": "BI",
+   "type": "link",
+   "url": "/d/nyc-bi",
+   "targetBlank": false,
+   "icon": "dashboard"
+  },
+  {
+   "title": "AI assistant",
+   "type": "link",
+   "url": "/d/nyc-ai-assistant",
+   "targetBlank": false,
+   "icon": "dashboard"
+  }
+ ],
+ "panels": [
+  {
+   "type": "table",
+   "title": "Pipeline runs (latest first)",
+   "description": "One row per Airflow run (run id as in Airflow).",
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "warehouse"
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "warehouse"
+     },
+     "rawSql": "SELECT run_id, source_month, status, published, forced,\n               round(extract(epoch FROM finished_at - started_at) / 60) AS minutes,\n               started_at, message\n        FROM ops.pipeline_runs ORDER BY started_at DESC LIMIT 25",
+     "format": "table",
+     "refId": "A",
+     "editorMode": "code",
+     "rawQuery": true
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "cellOptions": {
+       "type": "auto"
+      }
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "showHeader": true,
+    "cellHeight": "sm"
+   },
+   "id": 1,
+   "gridPos": {
+    "x": 0,
+    "y": 0,
+    "w": 24,
+    "h": 9
+   }
+  },
+  {
+   "type": "table",
+   "title": "Operational signals, latest value",
+   "description": "",
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "warehouse"
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "warehouse"
+     },
+     "rawSql": "SELECT DISTINCT ON (signal_name) signal_name, signal_value, unit, threshold, status,\n               run_id, measured_at\n        FROM ops.pipeline_signals ORDER BY signal_name, measured_at DESC",
+     "format": "table",
+     "refId": "A",
+     "editorMode": "code",
+     "rawQuery": true
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "cellOptions": {
+       "type": "auto"
+      }
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "showHeader": true,
+    "cellHeight": "sm"
+   },
+   "id": 2,
+   "gridPos": {
+    "x": 0,
+    "y": 9,
+    "w": 12,
+    "h": 8
+   }
+  },
+  {
+   "type": "table",
+   "title": "dbt tests not passing (last run)",
+   "description": "Empty when every test passed.",
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "warehouse"
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "warehouse"
+     },
+     "rawSql": "WITH last_run AS (SELECT run_id FROM ops.dbt_test_results ORDER BY recorded_at DESC LIMIT 1)\n        SELECT unique_id, status, failures, round(execution_time::numeric, 1) AS seconds, message\n        FROM ops.dbt_test_results\n        WHERE run_id IN (SELECT run_id FROM last_run) AND status <> 'pass'\n        ORDER BY status, unique_id",
+     "format": "table",
+     "refId": "A",
+     "editorMode": "code",
+     "rawQuery": true
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "cellOptions": {
+       "type": "auto"
+      }
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "showHeader": true,
+    "cellHeight": "sm"
+   },
+   "id": 3,
+   "gridPos": {
+    "x": 12,
+    "y": 9,
+    "w": 12,
+    "h": 8
+   }
+  },
+  {
+   "type": "table",
+   "title": "Ingestion batches",
+   "description": "",
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "warehouse"
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "warehouse"
+     },
+     "rawSql": "SELECT dataset, to_char(source_month, 'YYYY-MM') AS month, status, row_count_file,\n               row_count_bronze, round(file_size_bytes / 1048576.0, 1) AS mb,\n               schema_version, left(sha256, 12) AS sha256, started_at, error_message\n        FROM ops.ingestion_manifest ORDER BY started_at DESC LIMIT 20",
+     "format": "table",
+     "refId": "A",
+     "editorMode": "code",
+     "rawQuery": true
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "cellOptions": {
+       "type": "auto"
+      }
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "showHeader": true,
+    "cellHeight": "sm"
+   },
+   "id": 4,
+   "gridPos": {
+    "x": 0,
+    "y": 17,
+    "w": 24,
+    "h": 8
+   }
+  },
+  {
+   "type": "row",
+   "title": "Airflow (StatsD)",
+   "collapsed": false,
+   "id": 5,
+   "gridPos": {
+    "x": 0,
+    "y": 25,
+    "w": 24,
+    "h": 1
+   },
+   "panels": []
+  },
+  {
+   "type": "timeseries",
+   "title": "Task duration",
+   "description": "",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "max by (task_id) (rate(airflow_task_duration_seconds_sum[15m]) / rate(airflow_task_duration_seconds_count[15m]))",
+     "legendFormat": "{{task_id}}",
+     "refId": "A",
+     "instant": false,
+     "range": true
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "s",
+     "custom": {
+      "drawStyle": "line",
+      "fillOpacity": 8,
+      "lineWidth": 2,
+      "showPoints": "never",
+      "stacking": {
+       "mode": "none"
+      }
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "table",
+     "placement": "bottom",
+     "calcs": [
+      "lastNotNull",
+      "max"
+     ]
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "id": 6,
+   "gridPos": {
+    "x": 0,
+    "y": 26,
+    "w": 12,
+    "h": 8
+   }
+  },
+  {
+   "type": "timeseries",
+   "title": "Tasks finished by state",
+   "description": "",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "sum by (state) (increase(airflow_task_finished_total[1h]))",
+     "legendFormat": "{{state}}",
+     "refId": "A",
+     "instant": false,
+     "range": true
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "custom": {
+      "drawStyle": "bars",
+      "fillOpacity": 25,
+      "lineWidth": 2,
+      "showPoints": "never",
+      "stacking": {
+       "mode": "normal"
+      }
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "table",
+     "placement": "bottom",
+     "calcs": [
+      "lastNotNull",
+      "max"
+     ]
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "id": 7,
+   "gridPos": {
+    "x": 12,
+    "y": 26,
+    "w": 12,
+    "h": 8
+   }
+  },
+  {
+   "type": "timeseries",
+   "title": "Scheduler heartbeat",
+   "description": "Flat at zero: the scheduler is not running or stalled.",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "prometheus"
+     },
+     "expr": "rate(airflow_scheduler_heartbeat_total[5m])",
+     "legendFormat": "heartbeats/s",
+     "refId": "A",
+     "instant": false,
+     "range": true
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "custom": {
+      "drawStyle": "line",
+      "fillOpacity": 8,
+      "lineWidth": 2,
+      "showPoints": "never",
+      "stacking": {
+       "mode": "none"
+      }
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "table",
+     "placement": "bottom",
+     "calcs": [
+      "lastNotNull",
+      "max"
+     ]
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "id": 8,
+   "gridPos": {
+    "x": 0,
+    "y": 34,
+    "w": 12,
+    "h": 6
+   }
+  },
+  {
+   "type": "logs",
+   "title": "Airflow errors",
+   "datasource": {
+    "type": "loki",
+    "uid": "loki"
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "expr": "{service=~\"airflow.*\"} |~ \"(?i)error|failed|exception\"",
+     "refId": "A"
+    }
+   ],
+   "options": {
+    "showTime": true,
+    "wrapLogMessage": true,
+    "sortOrder": "Descending",
+    "enableLogDetails": true
+   },
+   "id": 9,
+   "gridPos": {
+    "x": 12,
+    "y": 34,
+    "w": 12,
+    "h": 6
+   }
+  }
+ ],
+ "templating": {
+  "list": []
+ }
+}

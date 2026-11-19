@@ -54,7 +54,7 @@ def setup(app=None) -> None:
     if app is not None:
         from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
-        FastAPIInstrumentor.instrument_app(app, excluded_urls="health")
+        FastAPIInstrumentor.instrument_app(app, excluded_urls="health,metrics")
     _configured = True
 
 

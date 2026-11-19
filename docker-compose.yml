@@ -7,6 +7,7 @@ x-superset-env: &superset-env
   SUPERSET_SECRET_KEY: ${SUPERSET_SECRET_KEY}
   SUPERSET_DB_PASSWORD: ${SUPERSET_DB_PASSWORD}
   SUPERSET_CONFIG_PATH: /app/pythonpath/superset_config.py
+  METRICS_STATSD_ON: ${METRICS_STATSD_ON:-true}
   REDIS_HOST: redis
 
 x-airflow-common: &airflow-common
@@ -64,6 +65,12 @@ x-airflow-common: &airflow-common
     INGEST_BATCH_ROWS: ${INGEST_BATCH_ROWS:-200000}
     NOTIFY_WEBHOOK_URL: ${NOTIFY_WEBHOOK_URL:-}
     PIPELINE_SCHEDULE: ${PIPELINE_SCHEDULE:-}
+    # Metrics of runs, tasks and the scheduler to Prometheus via statsd-exporter, which
+    # starts with the core services (METRICS_STATSD_ON=false turns them off).
+    AIRFLOW__METRICS__STATSD_ON: ${METRICS_STATSD_ON:-true}
+    AIRFLOW__METRICS__STATSD_HOST: statsd-exporter
+    AIRFLOW__METRICS__STATSD_PORT: "9125"
+    AIRFLOW__METRICS__STATSD_PREFIX: airflow
     # Superset refresh after each publication (task refresh_dashboards).
     SUPERSET_URL: http://superset:8088
     SUPERSET_ADMIN_PASSWORD: ${SUPERSET_ADMIN_PASSWORD}
@@ -93,6 +100,7 @@ services:
       TRANSFORMER_PASSWORD: ${TRANSFORMER_PASSWORD}
       PUBLISHER_PASSWORD: ${PUBLISHER_PASSWORD}
       SUPERSET_READER_PASSWORD: ${SUPERSET_READER_PASSWORD}
+      METRICS_READER_PASSWORD: ${METRICS_READER_PASSWORD}
       AI_READER_PASSWORD: ${AI_READER_PASSWORD}
       AI_AUDIT_WRITER_PASSWORD: ${AI_AUDIT_WRITER_PASSWORD}
       AIRFLOW_DB_PASSWORD: ${AIRFLOW_DB_PASSWORD}
@@ -397,6 +405,9 @@ services:
       SUPERSET_URL: http://superset:8088
       SUPERSET_AI_USER: ai_builder
       SUPERSET_AI_PASSWORD: ${SUPERSET_AI_PASSWORD}
+      # Traces to Tempo (profile observability); empty: traces are created, not sent.
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      OTEL_SERVICE_NAME: nyc-taxi-assistant
     ports:
       - "${API_PORT:-8000}:8000"
     depends_on:
@@ -406,8 +417,171 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # ------------------------------------------------------------------ observability
+  # Metrics (Prometheus, exporters, Alertmanager), logs (Loki, Alloy), traces (Tempo) and
+  # one place to see them (Grafana, dashboards and data sources as code). Memory limits
+  # keep the stack within about 1.3 GB on the development machine.
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    profiles: [observability]
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=15d
+      - --web.enable-remote-write-receiver  # span metrics from Tempo
+      - --enable-feature=exemplar-storage  # metric points link to their traces
+    volumes:
+      - ./infra/observability/prometheus:/etc/prometheus:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    mem_limit: 300m
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9090/-/ready"]
+      interval: 20s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  alertmanager:
+    image: prom/alertmanager:v0.28.1
+    profiles: [observability]
+    command: [--config.file=/etc/alertmanager/alertmanager.yml, --storage.path=/alertmanager]
+    volumes:
+      - ./infra/observability/alertmanager:/etc/alertmanager:ro
+      - alertmanager_data:/alertmanager
+    ports:
+      - "${ALERTMANAGER_PORT:-9093}:9093"
+    mem_limit: 64m
+    restart: unless-stopped
+
+  node-exporter:
+    image: prom/node-exporter:v1.9.1
+    profiles: [observability]
+    command:
+      - --path.procfs=/host/proc
+      - --path.sysfs=/host/sys
+      - --collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+    mem_limit: 48m
+    restart: unless-stopped
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.52.1
+    profiles: [observability]
+    privileged: true
+    command: [--docker_only=true, --housekeeping_interval=30s, --store_container_labels=false]
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+    mem_limit: 160m
+    restart: unless-stopped
+
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.17.1
+    profiles: [observability]
+    environment:
+      DATA_SOURCE_URI: postgres:5432/${POSTGRES_DB}?sslmode=disable
+      DATA_SOURCE_USER: metrics_reader
+      DATA_SOURCE_PASS: ${METRICS_READER_PASSWORD}
+    command: [--extend.query-path=/etc/postgres-exporter/queries.yml]
+    volumes:
+      - ./infra/observability/postgres-exporter:/etc/postgres-exporter:ro
+    mem_limit: 64m
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.75.0
+    profiles: [observability]
+    environment:
+      REDIS_ADDR: redis://redis:6379
+    mem_limit: 32m
+    restart: unless-stopped
+
+  # Starts with the core services: Airflow and Superset resolve its name when they start,
+  # so it must exist whenever they run (48 MB); Prometheus reads it when observability runs.
+  statsd-exporter:
+    image: prom/statsd-exporter:v0.28.0
+    profiles: [core, observability]
+    command: [--statsd.mapping-config=/etc/statsd/mapping.yml]
+    volumes:
+      - ./infra/observability/statsd:/etc/statsd:ro
+    mem_limit: 48m
+    restart: unless-stopped
+
+  loki:
+    image: grafana/loki:3.5.3
+    profiles: [observability]
+    command: [-config.file=/etc/loki/loki.yml]
+    volumes:
+      - ./infra/observability/loki:/etc/loki:ro
+      - loki_data:/loki
+    mem_limit: 256m
+    restart: unless-stopped
+
+  alloy:
+    image: grafana/alloy:v1.10.2
+    profiles: [observability]
+    command:
+      - run
+      - /etc/alloy/config.alloy
+      - --server.http.listen-addr=0.0.0.0:12345
+      - --storage.path=/var/lib/alloy/data
+    volumes:
+      - ./infra/observability/alloy:/etc/alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    mem_limit: 128m
+    depends_on: [loki]
+    restart: unless-stopped
+
+  tempo:
+    image: grafana/tempo:2.8.2
+    profiles: [observability]
+    user: "0"  # writes its blocks to the named volume
+    command: [-config.file=/etc/tempo/tempo.yml]
+    volumes:
+      - ./infra/observability/tempo:/etc/tempo:ro
+      - tempo_data:/var/tempo
+    mem_limit: 256m
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:12.1.1
+    profiles: [observability]
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_FEATURE_TOGGLES_ENABLE: traceToMetrics
+      # Home page = "where is the problem?"; no internet news feed (offline deployment).
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/nyc-overview.json
+      GF_NEWS_NEWS_FEED_ENABLED: "false"
+      METRICS_READER_PASSWORD: ${METRICS_READER_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      AIRFLOW_URL: http://localhost:${AIRFLOW_PORT:-8080}
+    volumes:
+      - ./infra/observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    mem_limit: 256m
+    depends_on: [prometheus, loki, tempo]
+    restart: unless-stopped
+
 volumes:
   ollama_models:
   airflow_logs:
   postgres_data:
   rustfs_data:
+  prometheus_data:
+  alertmanager_data:
+  loki_data:
+  tempo_data:
+  grafana_data:

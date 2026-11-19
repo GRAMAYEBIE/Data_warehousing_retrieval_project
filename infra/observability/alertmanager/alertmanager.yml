@@ -1,0 +1,26 @@
+# Alertmanager: groups the alerts of infra/observability/prometheus/rules/ by layer.
+# Alerts are visible in Alertmanager (http://localhost:9093) and in Grafana. To send them
+# to a team channel, add a webhook receiver (Slack, Teams or the NOTIFY_WEBHOOK_URL used
+# by the pipeline) and route to it:
+#   - name: team
+#     webhook_configs:
+#       - url: https://hooks.example/...
+route:
+  receiver: default
+  group_by: [alertname, layer]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    - matchers: [severity="critical"]
+      receiver: default
+      repeat_interval: 1h
+
+receivers:
+  - name: default
+
+inhibit_rules:
+  # A target that is down explains its other alerts.
+  - source_matchers: [alertname="TargetDown"]
+    target_matchers: [severity="warning"]
+    equal: [job]

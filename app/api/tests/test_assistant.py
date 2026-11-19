@@ -22,7 +22,7 @@ from assistant.llm import (
     keep_alive_value,
 )
 from assistant.resolver import UnsafeSQL, build, check
-from assistant.schemas import DateRange, Filter, Intent, Period, QueryPlan
+from assistant.schemas import Answer, DateRange, Filter, Intent, Period, QueryPlan
 from assistant.service import Assistant
 from assistant.validator import PlanRejected, validate
 
@@ -346,6 +346,31 @@ def test_two_invalid_plans_are_malformed_output():
     llm, _ = scripted_ollama(["no json here", '{"limit": 999}'])
     with pytest.raises(MalformedOutput):
         llm.structured("sys", "q", QueryPlan)
+
+
+def test_answers_are_counted_for_prometheus():
+    from prometheus_client import REGISTRY
+
+    from assistant import metrics
+
+    def value(name, labels):
+        return REGISTRY.get_sample_value(name, labels) or 0
+
+    before = value("assistant_answers_total", {"status": "answered", "variant": "vX"})
+    replaced = value("assistant_narrative_checks_total", {"check": "replaced"})
+    answer = Answer(
+        session_id="s",
+        status="answered",
+        question="Top zones by trips",
+        narrative_check="replaced",
+        step_ms={"plan": 1500},
+        llm_usage={"plan": {"calls": 1, "prompt_tokens": 40, "output_tokens": 20}},
+        duration_ms=2000,
+    )
+    metrics.observe(answer, "vX")
+    assert value("assistant_answers_total", {"status": "answered", "variant": "vX"}) == before + 1
+    assert value("assistant_narrative_checks_total", {"check": "replaced"}) == replaced + 1
+    assert value("assistant_llm_tokens_total", {"step": "plan", "kind": "written"}) >= 20
 
 
 def test_model_usage_is_summed_per_step():

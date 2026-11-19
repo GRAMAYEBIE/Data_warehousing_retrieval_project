@@ -1,0 +1,88 @@
+# Alert rules as code. Each alert names the layer, says what is wrong and what to open.
+# Thresholds are the platform's agreed limits (README, governance note).
+groups:
+  - name: data
+    rules:
+      - alert: DataStale
+        expr: nyc_pipeline_data_age_days > 45
+        for: 1h
+        labels: {severity: warning, layer: pipeline}
+        annotations:
+          summary: "Published data is {{ $value | printf \"%.0f\" }} days old (limit 45)."
+          action: "Open Airflow: did the monthly run of the 3rd fail or wait for the TLC file?"
+      - alert: ValidTripRateBelowThreshold
+        expr: nyc_quality_valid_trip_rate_latest < 0.85
+        labels: {severity: critical, layer: quality}
+        annotations:
+          summary: "Valid-trip rate of the latest month is {{ $value | humanizePercentage }} (threshold 85 %)."
+          action: "Pause decisions based on that month; open dashboard 5 and the Data quality board."
+      - alert: UnexplainedReconciliationRows
+        expr: nyc_quality_unexplained_rows > 0
+        labels: {severity: critical, layer: quality}
+        annotations:
+          summary: "{{ $value }} rows lost between bronze and silver without a reason."
+          action: "Check gold.recon_bronze_silver for the month; the publication gate blocks it."
+      - alert: PipelineRunFailed
+        expr: nyc_pipeline_last_run_failed == 1
+        labels: {severity: critical, layer: pipeline}
+        annotations:
+          summary: "The last monthly pipeline run failed: {{ $labels.run_id }}."
+          action: "Open the run in Airflow; users still see the previous publication."
+      - alert: DbtTestsFailed
+        expr: nyc_pipeline_dbt_failed_tests_last_run > 0
+        labels: {severity: critical, layer: pipeline}
+        annotations:
+          summary: "{{ $value }} dbt tests failed in the last run."
+          action: "ops.dbt_test_results lists the failing tests; the gate keeps the previous data."
+
+  - name: assistant
+    rules:
+      - alert: AssistantSlow
+        expr: histogram_quantile(0.5, sum by (le) (rate(assistant_answer_seconds_bucket[30m]))) > 300
+        for: 15m
+        labels: {severity: warning, layer: ai}
+        annotations:
+          summary: "Median answer time {{ $value | printf \"%.0f\" }} s over 30 minutes."
+          action: "AI assistant board: which step is slow (plan, narrate, execute)?"
+      - alert: AssistantModelUnavailable
+        expr: increase(assistant_answers_total{status="model_unavailable"}[15m]) > 0
+        labels: {severity: critical, layer: ai}
+        annotations:
+          summary: "The language model did not answer in the last 15 minutes."
+          action: "Check the ollama container; answers are degraded, dashboards still work."
+      - alert: AssistantHallucinationsCaught
+        expr: increase(assistant_narrative_checks_total{check="replaced"}[1h]) >= 3
+        labels: {severity: info, layer: ai}
+        annotations:
+          summary: "{{ $value }} narratives replaced by the number check in one hour."
+          action: "Review ops.ai_audit_log reasons: prompt or model regression?"
+
+  - name: host
+    rules:
+      - alert: MemoryPressure
+        expr: (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) > 0.92
+        for: 10m
+        labels: {severity: warning, layer: host}
+        annotations:
+          summary: "Docker host memory {{ $value | humanizePercentage }} used for 10 minutes."
+          action: "Stop a profile (bi, ai or observability) before running a dbt build."
+      - alert: SwapHeavy
+        expr: (1 - node_memory_SwapFree_bytes / node_memory_SwapTotal_bytes) > 0.5
+        for: 10m
+        labels: {severity: warning, layer: host}
+        annotations:
+          summary: "Half of the swap is used: everything slows down."
+          action: "Infrastructure board: which container uses the memory?"
+      - alert: ContainerRestarted
+        expr: changes(container_start_time_seconds{name=~"nyc-taxi-insight-hub-.*"}[15m]) > 0
+        labels: {severity: warning, layer: host}
+        annotations:
+          summary: "Container {{ $labels.name }} restarted."
+          action: "Logs board, filter on this container; PostgreSQL restarts were CPU starvation before."
+      - alert: TargetDown
+        expr: up == 0
+        for: 5m
+        labels: {severity: warning, layer: observability}
+        annotations:
+          summary: "{{ $labels.job }} is not answering (layer {{ $labels.layer }})."
+          action: "Is its profile started? docker compose ps"

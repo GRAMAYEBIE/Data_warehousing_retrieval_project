@@ -95,6 +95,26 @@ jobs:
           assert len(names) >= 12 and not missing, missing
           EOF
 
+  observability:
+    name: observability-config
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prometheus configuration and alert rules (promtool)
+        run: >
+          docker run --rm -v "$PWD/infra/observability/prometheus:/etc/prometheus:ro"
+          --entrypoint promtool prom/prometheus:v3.5.0
+          check config /etc/prometheus/prometheus.yml
+      - name: Alertmanager configuration (amtool)
+        run: >
+          docker run --rm -v "$PWD/infra/observability/alertmanager:/etc/am:ro"
+          --entrypoint amtool prom/alertmanager:v0.28.1
+          check-config /etc/am/alertmanager.yml
+      - name: Grafana dashboards are generated from their code
+        run: |
+          python3 infra/observability/grafana/build_dashboards.py
+          git diff --exit-code infra/observability/grafana/dashboards
+
   compose:
     name: docker-compose-config
     runs-on: ubuntu-24.04
@@ -104,4 +124,4 @@ jobs:
         run: |
           cp .env.example .env
           docker compose --profile core --profile tools --profile orchestration \
-            --profile bi --profile ai config --quiet
+            --profile bi --profile ai --profile observability config --quiet

@@ -432,6 +432,18 @@ def publish(conn, run_id: str) -> dict:
             cur.execute(f"DROP TABLE IF EXISTS analytics.{name}")
             cur.execute(f"CREATE TABLE analytics.{name} AS {query}")
         counts |= create_bi_views(cur)
+        # The observability role reads the status and the reconciliation only, never the
+        # business aggregates (infra/postgres/init/07_observability.sql).
+        cur.execute(
+            """
+            DO $$ BEGIN
+                IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'metrics_reader') THEN
+                    GRANT SELECT ON analytics.pipeline_status, analytics.recon_bronze_silver
+                        TO metrics_reader;
+                END IF;
+            END $$
+            """
+        )
     conn.commit()
     log.info("published %s tables for run %s: %s", len(counts), run_id, counts)
     log.info("BI views loaded in memory (blocks): %s", prewarm_bi_views(conn))

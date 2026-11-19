@@ -11,7 +11,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 
-from assistant import guards, retrieval, telemetry
+from assistant import guards, metrics, retrieval, telemetry
 from assistant.catalog import RELATIONS, Catalog, load_catalog
 from assistant.config import Settings
 from assistant.grounding import ground, named_period
@@ -198,7 +198,15 @@ class Assistant:
             span.set_attribute("assistant.session_id", answer.session_id)
             span.set_attribute("assistant.status", answer.status)
             span.set_attribute("assistant.narrative_check", answer.narrative_check)
-            return answer
+        metrics.observe(answer, variant)
+        # One log line per answer: Loki keeps the trace id, so a log line opens its trace.
+        print(
+            f"answer status={answer.status} check={answer.narrative_check} "
+            f"seconds={answer.duration_ms / 1000:.1f} session={answer.session_id} "
+            f"variant={variant} trace_id={answer.trace_id}",
+            flush=True,
+        )
+        return answer
 
     def _ask(self, question: str, session_id: str | None, variant: str, timings: dict) -> Answer:
         start = time.monotonic()

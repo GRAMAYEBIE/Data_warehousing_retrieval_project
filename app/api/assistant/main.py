@@ -10,7 +10,8 @@ import threading
 from contextlib import asynccontextmanager
 from functools import lru_cache
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Response
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from pydantic import BaseModel, Field
 
 from assistant import telemetry
@@ -84,6 +85,12 @@ def health() -> dict:
         "prompt_cache_warm_up": WARM_UP,
         "complete_months": months,
     }
+
+
+@app.get("/metrics", include_in_schema=False)
+def prometheus_metrics() -> Response:
+    """Counts and durations for Prometheus; no question text and no data value."""
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
 @app.get("/catalog", dependencies=[Depends(authorised)])

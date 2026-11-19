@@ -100,3 +100,14 @@ FAB_ADD_SECURITY_API = True
 
 WTF_CSRF_ENABLED = True
 TALISMAN_ENABLED = False  # local deployment over plain HTTP
+
+# Metrics for Prometheus (profile observability), sent as StatsD to statsd-exporter.
+# Off unless METRICS_STATSD_ON=true: the client resolves the host name at start-up.
+if os.environ.get("METRICS_STATSD_ON", "false").lower() == "true":
+    from superset.stats_logger import StatsdStatsLogger
+
+    STATS_LOGGER = StatsdStatsLogger(
+        host=os.environ.get("STATSD_HOST", "statsd-exporter"),
+        port=int(os.environ.get("STATSD_PORT", "9125")),
+        prefix="superset",
+    )

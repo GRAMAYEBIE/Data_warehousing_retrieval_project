@@ -1,0 +1,112 @@
+# Pipeline and data-quality state read from the warehouse by postgres-exporter (role
+# metrics_reader: pg_monitor plus SELECT on the operational tables, nothing else).
+# Metric name = <query name>_<column>; text columns become labels.
+
+nyc_pipeline:
+  query: |
+    SELECT extract(epoch FROM now() - published_at) / 86400 AS data_age_days,
+           source_months_loaded AS months_published,
+           extract(epoch FROM published_at) AS published_timestamp,
+           run_id
+    FROM analytics.pipeline_status
+  metrics:
+    - run_id: {usage: LABEL, description: Run that produced the current publication}
+    - data_age_days: {usage: GAUGE, description: Days since the last successful publication}
+    - months_published: {usage: GAUGE, description: Complete source months in the publication}
+    - published_timestamp: {usage: GAUGE, description: Time of the last publication (Unix)}
+
+nyc_pipeline_last_run:
+  query: |
+    SELECT run_id, status, coalesce(source_month::text, '') AS source_month,
+           (status = 'failed')::int AS failed,
+           (status = 'published')::int AS published,
+           extract(epoch FROM coalesce(finished_at, now()) - started_at) AS duration_seconds
+    FROM ops.pipeline_runs ORDER BY started_at DESC LIMIT 1
+  metrics:
+    - run_id: {usage: LABEL, description: Last pipeline run}
+    - status: {usage: LABEL, description: Outcome of the last run}
+    - source_month: {usage: LABEL, description: Month targeted by the last run}
+    - failed: {usage: GAUGE, description: 1 when the last run failed}
+    - published: {usage: GAUGE, description: 1 when the last run published data}
+    - duration_seconds: {usage: GAUGE, description: Duration of the last run}
+
+nyc_pipeline_dbt:
+  query: |
+    WITH last_run AS (
+        SELECT run_id FROM ops.dbt_test_results ORDER BY recorded_at DESC LIMIT 1
+    )
+    SELECT count(*) FILTER (WHERE status IN ('fail', 'error')) AS failed_tests_last_run,
+           count(*) AS tests_last_run,
+           coalesce(sum(execution_time), 0) AS test_seconds_last_run
+    FROM ops.dbt_test_results WHERE run_id IN (SELECT run_id FROM last_run)
+  metrics:
+    - failed_tests_last_run: {usage: GAUGE, description: dbt tests failed or in error in the last run}
+    - tests_last_run: {usage: GAUGE, description: dbt tests executed in the last run}
+    - test_seconds_last_run: {usage: GAUGE, description: Total dbt test time of the last run}
+
+nyc_signal:
+  query: |
+    SELECT DISTINCT ON (signal_name) signal_name, status,
+           signal_value AS value, (status = 'fail')::int AS failed
+    FROM ops.pipeline_signals ORDER BY signal_name, measured_at DESC
+  metrics:
+    - signal_name: {usage: LABEL, description: Operational signal}
+    - status: {usage: LABEL, description: ok, warn or fail}
+    - value: {usage: GAUGE, description: Latest value of the signal}
+    - failed: {usage: GAUGE, description: 1 when the latest value fails its threshold}
+
+nyc_quality:
+  query: |
+    SELECT (SELECT valid_trip_rate_pct / 100.0 FROM analytics.recon_bronze_silver
+            ORDER BY source_month DESC LIMIT 1) AS valid_trip_rate_latest,
+           (SELECT coalesce(sum(unexplained_rows), 0) FROM analytics.recon_bronze_silver)
+               AS unexplained_rows,
+           (SELECT sum(invalid_rows)::float / nullif(sum(silver_rows), 0)
+            FROM analytics.recon_bronze_silver) AS invalid_rate
+  metrics:
+    - valid_trip_rate_latest: {usage: GAUGE, description: Valid-trip rate of the latest month}
+    - unexplained_rows: {usage: GAUGE, description: Rows lost between bronze and silver without a reason}
+    - invalid_rate: {usage: GAUGE, description: Share of invalid trips over the published months}
+
+nyc_quality_month:
+  query: |
+    SELECT to_char(source_month, 'YYYY-MM') AS source_month,
+           valid_trip_rate_pct / 100.0 AS valid_trip_rate, file_rows, silver_rows,
+           unexplained_rows
+    FROM analytics.recon_bronze_silver
+  metrics:
+    - source_month: {usage: LABEL, description: Source month}
+    - valid_trip_rate: {usage: GAUGE, description: Valid-trip rate of the month}
+    - file_rows: {usage: GAUGE, description: Rows in the source file}
+    - silver_rows: {usage: GAUGE, description: Rows in silver}
+    - unexplained_rows: {usage: GAUGE, description: Unexplained rows of the month}
+
+nyc_ingestion:
+  query: |
+    SELECT DISTINCT ON (dataset, source_month) dataset,
+           coalesce(to_char(source_month, 'YYYY-MM'), 'reference') AS source_month, status,
+           coalesce(row_count_bronze, 0) AS rows_bronze,
+           coalesce(file_size_bytes, 0) AS file_bytes,
+           extract(epoch FROM coalesce(finished_at, now()) - started_at) AS duration_seconds
+    FROM ops.ingestion_manifest
+    -- A future month cannot be loaded (e.g. the 2027-01 "source missing" test): not a gap.
+    WHERE source_month IS NULL OR source_month <= date_trunc('month', now())
+    ORDER BY dataset, source_month, started_at DESC
+  metrics:
+    - dataset: {usage: LABEL, description: Dataset}
+    - source_month: {usage: LABEL, description: Source month}
+    - status: {usage: LABEL, description: Status of the latest batch}
+    - rows_bronze: {usage: GAUGE, description: Rows loaded in bronze}
+    - file_bytes: {usage: GAUGE, description: Size of the source file}
+    - duration_seconds: {usage: GAUGE, description: Duration of the latest batch}
+
+nyc_ai_audit:
+  query: |
+    SELECT verdict, count(*) AS answers_24h,
+           coalesce(percentile_cont(0.5) WITHIN GROUP (ORDER BY duration_ms), 0) / 1000
+               AS median_seconds_24h
+    FROM ops.ai_audit_log WHERE created_at > now() - interval '24 hours' GROUP BY verdict
+  metrics:
+    - verdict: {usage: LABEL, description: Verdict of the assistant}
+    - answers_24h: {usage: GAUGE, description: Answers in the last 24 hours}
+    - median_seconds_24h: {usage: GAUGE, description: Median answer time in the last 24 hours}
