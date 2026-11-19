@@ -5,5 +5,12 @@ pydantic==2.11.9
 psycopg[binary]==3.2.10
 sqlglot==27.20.0
 httpx==0.28.1
+# Tracing (exported to Tempo when OTEL_EXPORTER_OTLP_ENDPOINT is set)
+opentelemetry-api==1.37.0
+opentelemetry-sdk==1.37.0
+opentelemetry-exporter-otlp-proto-http==1.37.0
+opentelemetry-instrumentation-fastapi==0.58b0
+opentelemetry-instrumentation-httpx==0.58b0
+opentelemetry-instrumentation-psycopg==0.58b0
 pytest==8.4.2
 ruff==0.13.3

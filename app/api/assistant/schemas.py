@@ -127,3 +127,5 @@ class Answer(BaseModel):
     provenance: Provenance | None = None
     active_filters: list[Filter] = Field(default_factory=list)
     duration_ms: int = 0
+    step_ms: dict[str, int] = Field(default_factory=dict)  # guards, plan, validate, ...
+    trace_id: str | None = None  # OpenTelemetry trace of this answer

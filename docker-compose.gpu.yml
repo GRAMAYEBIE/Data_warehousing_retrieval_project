@@ -1,0 +1,15 @@
+# GPU host (lab machine with an NVIDIA card and the NVIDIA Container Toolkit):
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml --profile core --profile ai up -d
+# or let `python scripts/bootstrap.py env --gpu` set COMPOSE_FILE in .env.
+# With a GPU, a larger model is practical: OLLAMA_MODEL=qwen2.5:7b (or 14b with 16 GB VRAM).
+services:
+  ollama:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    environment:
+      OLLAMA_NUM_PARALLEL: "4"

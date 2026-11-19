@@ -1,0 +1,107 @@
+# Continuous integration: every push and pull request is linted, tested and compiled.
+# No secret is needed: unit tests use fakes, dbt only parses (no database), and the
+# Compose check runs on .env.example.
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: ingestion
+            dir: ingestion
+            requirements: ingestion/requirements.txt
+            install_package: true
+          - name: ai-assistant-api
+            dir: app/api
+            requirements: app/api/requirements.txt
+          - name: metrics-sync-and-dashboards
+            dir: services/metrics_sync
+            requirements: ingestion/requirements.txt
+          - name: airflow-ops
+            dir: airflow
+            requirements: ingestion/requirements.txt
+          - name: bootstrap-script
+            dir: scripts
+            requirements: ingestion/requirements.txt
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: ${{ matrix.requirements }}
+      - name: Install pinned dependencies
+        run: |
+          pip install -r ${{ matrix.requirements }}
+          if [ "${{ matrix.install_package }}" = "true" ]; then pip install --no-deps -e ${{ matrix.dir }}; fi
+      - name: Lint
+        working-directory: ${{ matrix.dir }}
+        run: ruff check .
+      - name: Formatting
+        working-directory: ${{ matrix.dir }}
+        run: ruff format --check .
+      - name: Unit tests
+        working-directory: ${{ matrix.dir }}
+        run: pytest -q
+
+  dbt:
+    name: dbt-parse-and-semantic-layer
+    runs-on: ubuntu-24.04
+    env:
+      # dbt parse reads the profile but never connects.
+      DBT_HOST: localhost
+      DBT_DATABASE: warehouse
+      DBT_USER: ci
+      DBT_PASSWORD: ci
+      DBT_PROFILES_DIR: .
+    defaults:
+      run:
+        working-directory: dbt
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: dbt/requirements.txt
+      - run: pip install -r requirements.txt
+      - name: Install dbt packages
+        run: dbt deps
+      - name: Parse the project (models, tests, metrics, semantic models are validated)
+        run: dbt parse
+      - name: The semantic manifest contains the governed metrics
+        run: |
+          python - <<'EOF'
+          import json
+          metrics = json.load(open("target/semantic_manifest.json"))["metrics"]
+          names = {m["name"] for m in metrics}
+          print(len(names), "metrics:", ", ".join(sorted(names)))
+          missing = {"trips", "total_revenue", "avg_fare", "valid_trip_rate"} - names
+          assert len(names) >= 12 and not missing, missing
+          EOF
+
+  compose:
+    name: docker-compose-config
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Every profile resolves with the documented variables
+        run: |
+          cp .env.example .env
+          docker compose --profile core --profile tools --profile orchestration \
+            --profile bi --profile ai config --quiet

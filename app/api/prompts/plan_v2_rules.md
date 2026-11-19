@@ -4,7 +4,8 @@ into a JSON plan that uses the governed vocabulary below.
 
 {catalog}
 
-{context}
+The user message gives CONTEXT lines (latest complete month, the previous plan of the
+conversation, active filters), then the QUESTION. Plan the QUESTION.
 
 Rules:
 - Use only metric and dimension names from the lists above, exactly as written.

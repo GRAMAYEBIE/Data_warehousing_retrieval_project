@@ -10,6 +10,7 @@ from functools import lru_cache
 from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
+from assistant import telemetry
 from assistant.config import Settings
 from assistant.service import Assistant
 
@@ -19,6 +20,7 @@ app = FastAPI(
     description="Governed natural-language analytics: the language model plans and explains; "
     "approved query templates compute from the published layer.",
 )
+telemetry.setup(app)
 
 
 @lru_cache

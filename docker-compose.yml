@@ -340,8 +340,11 @@ services:
     image: ollama/ollama:0.40.12
     profiles: [ai]
     environment:
-      OLLAMA_KEEP_ALIVE: 30m  # keep the model loaded between questions
-      OLLAMA_NUM_PARALLEL: "1"
+      # Loading the model takes minutes on a laptop CPU: load it once and keep it.
+      OLLAMA_KEEP_ALIVE: "-1"
+      # Two cache slots: the planner and the narrator each keep their own system prompt
+      # already read, so a question only reads its new tokens.
+      OLLAMA_NUM_PARALLEL: "2"
       OLLAMA_MAX_LOADED_MODELS: "1"
     volumes:
       - ollama_models:/root/.ollama
@@ -355,13 +358,15 @@ services:
       start_period: 20s
     restart: unless-stopped
 
-  # One-shot: download the model named in .env (skipped when already present).
+  # One-shot: download the model named in .env (skipped when already present), then load
+  # it into memory so the first question does not wait for the load.
   ollama-pull:
     image: ollama/ollama:0.40.12
     profiles: [ai]
     environment:
       OLLAMA_HOST: http://ollama:11434
-    entrypoint: ["ollama", "pull", "${OLLAMA_MODEL:-qwen2.5:3b}"]
+      MODEL: ${OLLAMA_MODEL:-qwen2.5:3b}
+    entrypoint: ["/bin/sh", "-c", "ollama pull \"$$MODEL\" && ollama run \"$$MODEL\" ready > /dev/null"]
     depends_on:
       ollama:
         condition: service_healthy
@@ -379,6 +384,8 @@ services:
       OLLAMA_URL: http://ollama:11434
       OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:3b}
       PROMPT_VARIANT: ${PROMPT_VARIANT:-v3_structured_examples}
+      OLLAMA_NUM_THREAD: ${OLLAMA_NUM_THREAD:-0}
+      LLM_TIMEOUT_S: ${LLM_TIMEOUT_S:-900}
       API_TOKEN: ${API_TOKEN}
       SUPERSET_URL: http://superset:8088
       SUPERSET_AI_USER: ai_builder

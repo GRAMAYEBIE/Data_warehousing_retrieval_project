@@ -11,10 +11,17 @@ import time
 import uuid
 from dataclasses import dataclass, field
 
-from assistant import guards
+from assistant import guards, telemetry
 from assistant.catalog import Catalog, load_catalog
 from assistant.config import Settings
-from assistant.llm import MalformedOutput, ModelUnavailable, Ollama, load_prompt, planning_prompt
+from assistant.llm import (
+    MalformedOutput,
+    ModelUnavailable,
+    Ollama,
+    load_prompt,
+    planning_message,
+    planning_prompt,
+)
 from assistant.resolver import UnsafeSQL, build, pivot_comparison, render
 from assistant.schemas import (
     Answer,
@@ -47,7 +54,13 @@ class Assistant:
         self, settings: Settings, llm: Ollama | None = None, store: Store | None = None
     ) -> None:
         self.settings = settings
-        self.llm = llm or Ollama(settings.ollama_url, settings.model, settings.llm_timeout_s)
+        self.llm = llm or Ollama(
+            settings.ollama_url,
+            settings.model,
+            settings.llm_timeout_s,
+            settings.llm_threads,
+            settings.llm_keep_alive,
+        )
         self.store = store or Store(settings)
         self.sessions: dict[str, Session] = {}
         self._catalog: Catalog | None = None
@@ -102,17 +115,18 @@ class Assistant:
         variant: str | None = None,
         model_cls: type[QueryPlan] = QueryPlan,
     ) -> QueryPlan:
-        system = planning_prompt(
-            variant or self.settings.prompt_variant, self.catalog().summary(), self.context(session)
+        system = planning_prompt(variant or self.settings.prompt_variant, self.catalog().summary())
+        return self.llm.structured(
+            system, planning_message(self.context(session), question), model_cls
         )
-        return self.llm.structured(system, question, model_cls)
 
     def plan_report(self, question: str) -> ReportRequest:
         """A report request: the planning prompt plus the report instructions (exam Q8)."""
-        system = planning_prompt(
-            self.settings.prompt_variant, self.catalog().summary(), self.context(Session("r"))
-        ) + load_prompt("report")
-        return self.llm.structured(system, question, ReportRequest)
+        system = planning_prompt(self.settings.prompt_variant, self.catalog().summary())
+        system += load_prompt("report")
+        return self.llm.structured(
+            system, planning_message(self.context(Session("r")), question), ReportRequest
+        )
 
     @staticmethod
     def merge_follow_up(plan: QueryPlan, session: Session) -> QueryPlan:
@@ -130,10 +144,25 @@ class Assistant:
     def ask(
         self, question: str, session_id: str | None = None, variant: str | None = None
     ) -> Answer:
+        """One question = one trace (root span), one child span per step."""
+        variant = variant or self.settings.prompt_variant
+        with telemetry.tracer.start_as_current_span(
+            "assistant.ask",
+            attributes={
+                "assistant.prompt_variant": variant,
+                "assistant.model": self.settings.model,
+            },
+        ) as span:
+            answer = self._ask(question, session_id, variant, {})
+            span.set_attribute("assistant.session_id", answer.session_id)
+            span.set_attribute("assistant.status", answer.status)
+            span.set_attribute("assistant.narrative_check", answer.narrative_check)
+            return answer
+
+    def _ask(self, question: str, session_id: str | None, variant: str, timings: dict) -> Answer:
         start = time.monotonic()
         session = self.session(session_id) if session_id else self.new_session()
         session.turns += 1
-        variant = variant or self.settings.prompt_variant
         base = {
             "session_id": session.session_id,
             "question": question,
@@ -144,18 +173,25 @@ class Assistant:
         def finish(answer: Answer, **audit) -> Answer:
             answer.duration_ms = int((time.monotonic() - start) * 1000)
             answer.active_filters = list(session.active_filters)
+            answer.step_ms = dict(timings)
+            answer.trace_id = telemetry.current_trace_id()
             self.store.audit(
                 **base,
                 verdict=answer.status,
                 reasons=answer.reasons,
                 plan=answer.plan.model_dump(mode="json") if answer.plan else None,
                 duration_ms=answer.duration_ms,
+                step_ms=answer.step_ms,
+                trace_id=answer.trace_id,
                 **audit,
             )
             return answer
 
         # 1. Deterministic guards, before the model.
-        if guards.injection_detected(question):
+        with telemetry.step("guards", timings):
+            injected = guards.injection_detected(question)
+            reason = guards.unsupported_reason(question)
+        if injected:
             return finish(
                 Answer(
                     session_id=session.session_id,
@@ -169,7 +205,6 @@ class Assistant:
                     "I cannot run commands or change data.",
                 )
             )
-        reason = guards.unsupported_reason(question)
         if reason:
             return finish(
                 Answer(
@@ -188,7 +223,8 @@ class Assistant:
 
         # 2. Plan with the model (structured output).
         try:
-            plan = self.plan(question, session, variant)
+            with telemetry.step("plan", timings):
+                plan = self.plan(question, session, variant)
         except ModelUnavailable as exc:
             return finish(
                 Answer(
@@ -238,8 +274,9 @@ class Assistant:
         # 3. Validation and policy.
         plan = self.merge_follow_up(plan, session)
         try:
-            resolved = validate(plan, self.catalog())
-            built = build(resolved, self.catalog(), self.settings.max_rows)
+            with telemetry.step("validate", timings):
+                resolved = validate(plan, self.catalog())
+                built = build(resolved, self.catalog(), self.settings.max_rows)
         except PlanRejected as exc:
             return finish(
                 Answer(
@@ -266,7 +303,8 @@ class Assistant:
         # 4. Execution as ai_reader.
         rendered = render(built.sql, built.params)
         try:
-            columns, rows, _ = self.store.query(built.sql, built.params)
+            with telemetry.step("execute", timings, **{"assistant.template": built.kind}):
+                columns, rows, _ = self.store.query(built.sql, built.params)
         except Exception as exc:  # noqa: BLE001 - any database error is reported, not raised
             return finish(
                 Answer(
@@ -288,7 +326,8 @@ class Assistant:
 
         session.last_plan = plan
         session.active_filters = resolved.filters
-        provenance = self.provenance(resolved, rendered, len(rows))
+        with telemetry.step("provenance", timings):
+            provenance = self.provenance(resolved, rendered, len(rows))
         period = self.period_text(resolved)
         filters = self.filters_text(resolved.filters)
 
@@ -310,7 +349,9 @@ class Assistant:
             )
 
         # 5. Narrative from the result only, then the number check.
-        narrative, check = self.narrate(question, plan, columns, rows, period, filters)
+        with telemetry.step("narrate", timings) as span:
+            narrative, check = self.narrate(question, plan, columns, rows, period, filters)
+            span.set_attribute("assistant.narrative_check", check)
         answer = Answer(
             session_id=session.session_id,
             status="answered",
@@ -335,15 +376,16 @@ class Assistant:
             [" | ".join(columns)]
             + [" | ".join("" if v is None else str(v) for v in row) for row in rows[:20]]
         )
-        prompt = load_prompt("narrate").format(
-            question=question,
-            metrics="; ".join(f"{m}: {d['label']} ({d['unit']})" for m, d in metrics.items()),
-            period=period,
-            filters=filters or "none",
-            result=table,
+        message = (
+            f"QUESTION: {question}\n"
+            "METRICS: "
+            + "; ".join(f"{m}: {d['label']} ({d['unit']})" for m, d in metrics.items())
+            + f"\nPERIOD: {period}\nFILTERS: {filters or 'none'}\n"
+            f"RESULT (columns, then up to 20 rows):\n{table}"
         )
         try:
-            text = self.llm.chat("You write short, factual summaries.", prompt).strip()
+            # Rules in the system prompt (same every time), data in the message.
+            text = self.llm.chat(load_prompt("narrate"), message, max_tokens=220).strip()
         except ModelUnavailable:
             return fallback, "replaced"
         bad = guards.unsupported_numbers(text, rows[:20])

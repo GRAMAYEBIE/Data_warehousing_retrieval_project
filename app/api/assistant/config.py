@@ -18,6 +18,8 @@ class Settings:
     api_token: str
     max_rows: int
     llm_timeout_s: float
+    llm_threads: int  # 0: Ollama decides
+    llm_keep_alive: str  # "-1": keep the model loaded
     superset_url: str
     superset_user: str
     superset_password: str
@@ -34,7 +36,9 @@ class Settings:
             prompt_variant=os.environ.get("PROMPT_VARIANT", "v3_structured_examples"),
             api_token=os.environ["API_TOKEN"],
             max_rows=int(os.environ.get("ASSISTANT_MAX_ROWS", "5000")),
-            llm_timeout_s=float(os.environ.get("LLM_TIMEOUT_S", "240")),
+            llm_timeout_s=float(os.environ.get("LLM_TIMEOUT_S", "600")),
+            llm_threads=int(os.environ.get("OLLAMA_NUM_THREAD", "0")),
+            llm_keep_alive=os.environ.get("OLLAMA_KEEP_ALIVE", "-1"),
             superset_url=os.environ.get("SUPERSET_URL", "http://superset:8088").rstrip("/"),
             superset_user=os.environ.get("SUPERSET_AI_USER", "ai_builder"),
             superset_password=os.environ.get("SUPERSET_AI_PASSWORD", ""),

@@ -61,10 +61,12 @@ class Store:
                     """
                     INSERT INTO ops.ai_audit_log
                         (session_id, question, prompt_variant, model, plan, verdict, reasons,
-                         rendered_sql, row_count, narrative_check, duration_ms)
+                         rendered_sql, row_count, narrative_check, duration_ms, step_ms,
+                         trace_id)
                     VALUES (%(session_id)s, %(question)s, %(prompt_variant)s, %(model)s,
                             %(plan)s, %(verdict)s, %(reasons)s, %(rendered_sql)s,
-                            %(row_count)s, %(narrative_check)s, %(duration_ms)s)
+                            %(row_count)s, %(narrative_check)s, %(duration_ms)s, %(step_ms)s,
+                            %(trace_id)s)
                     """,
                     {
                         "session_id": event.get("session_id", ""),
@@ -78,6 +80,8 @@ class Store:
                         "row_count": event.get("row_count"),
                         "narrative_check": event.get("narrative_check"),
                         "duration_ms": event.get("duration_ms"),
+                        "step_ms": json.dumps(event["step_ms"]) if event.get("step_ms") else None,
+                        "trace_id": event.get("trace_id"),
                     },
                 )
         except Exception as exc:  # noqa: BLE001 - auditing must not break the answer

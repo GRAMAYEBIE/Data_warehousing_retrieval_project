@@ -5,7 +5,9 @@ the plan and runs approved query templates; anything outside the vocabulary is r
 
 {catalog}
 
-{context}
+The user message gives CONTEXT lines (latest complete month, the previous plan of the
+conversation, active filters), then the QUESTION. Plan the QUESTION; a follow-up question
+may change only part of the previous plan.
 
 How to fill the plan:
 - metrics, dimensions: exact names from the lists. At most 5 metrics, 2 dimensions.

@@ -9,10 +9,10 @@ from __future__ import annotations
 
 import pytest
 
-from assistant import guards
+from assistant import guards, telemetry
 from assistant.catalog import Catalog
 from assistant.config import Settings
-from assistant.llm import ModelUnavailable
+from assistant.llm import ModelUnavailable, keep_alive_value
 from assistant.resolver import UnsafeSQL, build, check
 from assistant.schemas import DateRange, Filter, Intent, Period, QueryPlan
 from assistant.service import Assistant
@@ -71,6 +71,8 @@ SETTINGS = Settings(
     api_token="t",
     max_rows=5000,
     llm_timeout_s=1,
+    llm_threads=0,
+    llm_keep_alive="-1",
     superset_url="",
     superset_user="",
     superset_password="",
@@ -83,11 +85,12 @@ class FakeLLM:
 
     def structured(self, system, user, model_cls):
         self.calls += 1
+        self.systems = getattr(self, "systems", []) + [system]
         if self.down:
             raise ModelUnavailable("language model unavailable: ConnectError")
         return self.plan
 
-    def chat(self, system, user, schema=None):
+    def chat(self, system, user, schema=None, max_tokens=None):
         if self.down:
             raise ModelUnavailable("down")
         return self.narrative
@@ -283,6 +286,24 @@ def test_answer_has_provenance_and_a_checked_narrative():
     assert "sum(trip_count)" in answer.provenance.metrics[0].sql_expression
 
 
+def test_answer_carries_its_trace_and_step_durations():
+    telemetry.setup()  # tracer provider without exporter: traces are created, not sent
+    a = assistant(
+        plan(intent=Intent.rank, metrics=["trips"], dimensions=["pickup_zone"]),
+        narrative="JFK Airport led with 152,340 trips.",
+        store=FakeStore(COLUMNS, ROWS),
+    )
+    answer = a.ask("Top zones by trips")
+    assert answer.trace_id and len(answer.trace_id) == 32
+    assert {"guards", "plan", "validate", "execute", "narrate"} <= set(answer.step_ms)
+
+
+def test_keep_alive_is_sent_in_a_form_ollama_accepts():
+    # Observed failure: the string "-1" was refused with HTTP 400 "missing unit in duration".
+    assert keep_alive_value("-1") == -1
+    assert keep_alive_value("30m") == "30m"
+
+
 def test_invented_number_replaces_the_narrative():
     a = assistant(
         plan(intent=Intent.rank, metrics=["trips"], dimensions=["pickup_zone"]),
@@ -322,6 +343,9 @@ def test_follow_up_keeps_metrics_and_active_filters():
     assert second.plan.metrics == ["trips"] and dims == {"pickup_borough", "payment_type"}
     a.reset(first.session_id)
     assert a.session(first.session_id).active_filters == []
+    # The planner's system prompt does not change between turns: Ollama reuses it from
+    # its cache; the previous plan and active filters travel in the user message.
+    assert len(a.llm.systems) == 2 and a.llm.systems[0] == a.llm.systems[1]
 
 
 def test_number_check_accepts_percentages_and_millions():

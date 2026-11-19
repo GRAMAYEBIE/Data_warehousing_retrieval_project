@@ -68,7 +68,32 @@ Q3, Q4, Q8 and Q9 carry 40 marks: they have priority after the base platform.
 
 ## 3. Quick start
 
-Requirements: Docker with Docker Compose. Tested with Docker 29 and Compose v5 on Windows 11.
+Requirements: Docker with Docker Compose, and Python 3 (standard library only) for the
+bootstrap. Tested with Docker 29 and Compose v5 on Windows 11.
+
+### One command, from a fresh clone
+
+```bash
+git clone <this repository> && cd <repository>
+python scripts/bootstrap.py all --months 2024-12..2025-05
+# GPU machine (NVIDIA Container Toolkit): a larger model on the GPU
+python scripts/bootstrap.py all --months 2024-12..2025-05 --gpu --model qwen2.5:7b --max-active-tasks 3
+```
+
+`scripts/bootstrap.py` creates `.env` with random secrets (never overwrites an existing
+one), starts the core services, loads the taxi zones, runs the Airflow pipeline once per
+month in order (each run waited for, months already loaded are skipped), builds Superset
+and the six dashboards, then downloads and loads the model and checks the assistant's
+health. Each step runs alone (`env`, `core`, `load`, `bi`, `ai`) and can be run again.
+`--low-memory` stops Superset and Airflow before the assistant starts (8 GB laptop).
+
+**Continuous integration** (`.github/workflows/ci.yml`, every push): lint, formatting and
+unit tests of the five Python components (ingestion, assistant API, metrics sync and
+dashboards, Airflow operations, bootstrap), `dbt parse` with a check that the semantic
+manifest holds the governed metrics, and `docker compose config` on every profile with
+`.env.example`. No secret is needed.
+
+### Step by step
 
 ```bash
 # 1. Configuration: copy the template and replace every "change_me" value
