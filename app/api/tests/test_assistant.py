@@ -7,12 +7,20 @@ query failure, empty results, follow-ups, the SQL guard and the narrative number
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from assistant import guards, telemetry
 from assistant.catalog import Catalog
 from assistant.config import Settings
-from assistant.llm import MalformedOutput, ModelUnavailable, Ollama, keep_alive_value
+from assistant.llm import (
+    MalformedOutput,
+    ModelUnavailable,
+    Ollama,
+    compact_fields,
+    keep_alive_value,
+)
 from assistant.resolver import UnsafeSQL, build, check
 from assistant.schemas import DateRange, Filter, Intent, Period, QueryPlan
 from assistant.service import Assistant
@@ -74,6 +82,7 @@ SETTINGS = Settings(
     llm_threads=0,
     llm_keep_alive="-1",
     llm_output_mode="schema",
+    llm_concurrency=1,
     superset_url="",
     superset_user="",
     superset_password="",
@@ -316,7 +325,7 @@ def test_plan_wrapped_in_text_is_extracted_and_validated():
         ['Here is the plan:\n```json\n{"intent": "lookup", "metrics": ["trips"]}\n```']
     )
     assert llm.structured("sys", "q", QueryPlan).metrics == ["trips"]
-    assert calls[0]["schema"] is None and "JSON schema" in calls[0]["system"]
+    assert calls[0]["schema"] is None and "Fields" in calls[0]["system"]
 
 
 def test_invalid_plan_gets_one_repair_with_the_error_shown():
@@ -339,6 +348,21 @@ def test_two_invalid_plans_are_malformed_output():
         llm.structured("sys", "q", QueryPlan)
 
 
+def test_model_usage_is_summed_per_step():
+    telemetry.start_usage()
+    timings: dict = {}
+    reply = {"prompt_eval_count": 40, "prompt_eval_duration": 2e9, "eval_count": 25,
+             "eval_duration": 15e9}  # fmt: skip
+    with telemetry.step("plan", timings):
+        telemetry.record_llm_call(reply)
+        telemetry.record_llm_call(reply)  # a repair attempt
+    with telemetry.step("narrate", timings):
+        telemetry.record_llm_call(reply)
+    usage = telemetry.current_usage()
+    assert usage["plan"]["calls"] == 2 and usage["plan"]["output_tokens"] == 50
+    assert usage["plan"]["output_ms"] == 30000 and usage["narrate"]["calls"] == 1
+
+
 def test_keep_alive_is_sent_in_a_form_ollama_accepts():
     # Observed failure: the string "-1" was refused with HTTP 400 "missing unit in duration".
     assert keep_alive_value("-1") == -1
@@ -354,6 +378,44 @@ def test_invented_number_replaces_the_narrative():
     answer = a.ask("Top zones by trips")
     assert answer.narrative_check == "replaced"
     assert "152,340" in answer.narrative and "999" not in answer.narrative
+    # What the guard caught is kept for the evaluation and the audit log.
+    assert "999999" in answer.reasons[0] and "Model text" in answer.reasons[0]
+    assert a.store.audited[-1]["reasons"] == answer.reasons
+
+
+def test_the_model_sees_a_compact_field_list_not_the_raw_schema():
+    fields = compact_fields(QueryPlan.model_json_schema())
+    assert "- intent: trend|compare|rank|breakdown|lookup|clarify|unsupported" in fields
+    assert "filters: [{dimension: string, operator: =|!=|in|not in" in fields
+    assert "$ref" not in fields and "anyOf" not in fields
+    assert len(fields) < len(json.dumps(QueryPlan.model_json_schema())) / 2
+
+
+def test_a_false_ranking_with_true_numbers_is_caught():
+    # Observed on the first real test: true numbers, false claim (the Bronx is lower).
+    columns = ["pickup_borough", "total_revenue"]
+    rows = [["Manhattan", 66564271.19], ["Brooklyn", 1849488.69], ["Bronx", 382800.41]]
+    text = "Manhattan led with $66,564,271.19. Brooklyn had the lowest revenue at $1,849,488.69."
+    assert guards.wrong_rankings(text, columns, rows, "total_revenue") == [
+        "'Brooklyn' called lowest, but the lowest is 'Bronx'"
+    ]
+    right = "Manhattan led with $66,564,271.19. The Bronx had the lowest at $382,800.41."
+    assert guards.wrong_rankings(right, columns, rows, "total_revenue") == []
+
+
+def test_templates_read_the_prejoined_bi_views():
+    resolved = validate(
+        plan(
+            intent=Intent.rank,
+            metrics=["trips"],
+            dimensions=["pickup_borough"],
+            filters=[Filter(dimension="pickup_borough", values=["Manhattan"])],
+        ),
+        CATALOG,
+    )
+    sql = build(resolved, CATALOG, 5000).sql
+    assert "FROM analytics.mv_trips_daily AS a" in sql and "JOIN" not in sql
+    assert "a.pickup_borough" in sql
 
 
 def test_query_failure_is_reported():

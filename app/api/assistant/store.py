@@ -34,13 +34,23 @@ class Store:
             rows = cur.fetchall()
         return columns, rows, int((time.monotonic() - start) * 1000)
 
+    def prewarm(self, relations: list[str]) -> dict[str, int]:
+        """Load the views the assistant queries into PostgreSQL's memory (pg_prewarm), so
+        a question does not wait for the disk. Returns the blocks loaded per view."""
+        loaded = {}
+        with self.reader() as conn, conn.cursor() as cur:
+            cur.execute("SET statement_timeout = '120s'")  # one-off load, not a question
+            for relation in relations:
+                cur.execute("SELECT util.pg_prewarm(%s::regclass)", (relation,))
+                loaded[relation] = cur.fetchone()[0]
+        return loaded
+
     def valid_trip_rate(self, months: list[str]) -> float | None:
         sql = """
             SELECT sum(a.trip_count) FILTER (WHERE a.quality_status = 'valid')::float
                    / nullif(sum(a.trip_count), 0)
-            FROM analytics.agg_trips_daily AS a
-            JOIN analytics.dim_date AS d ON a.pickup_date_sk = d.date_sk
-            WHERE d.month_start = ANY(%(m)s::date[])
+            FROM analytics.mv_trips_daily AS a
+            WHERE a.month_start = ANY(%(m)s::date[])
         """
         with self.reader() as conn, conn.cursor() as cur:
             cur.execute(sql, {"m": [f"{m}-01" for m in months]})
@@ -62,11 +72,11 @@ class Store:
                     INSERT INTO ops.ai_audit_log
                         (session_id, question, prompt_variant, model, plan, verdict, reasons,
                          rendered_sql, row_count, narrative_check, duration_ms, step_ms,
-                         trace_id)
+                         trace_id, llm_usage)
                     VALUES (%(session_id)s, %(question)s, %(prompt_variant)s, %(model)s,
                             %(plan)s, %(verdict)s, %(reasons)s, %(rendered_sql)s,
                             %(row_count)s, %(narrative_check)s, %(duration_ms)s, %(step_ms)s,
-                            %(trace_id)s)
+                            %(trace_id)s, %(llm_usage)s)
                     """,
                     {
                         "session_id": event.get("session_id", ""),
@@ -82,6 +92,9 @@ class Store:
                         "duration_ms": event.get("duration_ms"),
                         "step_ms": json.dumps(event["step_ms"]) if event.get("step_ms") else None,
                         "trace_id": event.get("trace_id"),
+                        "llm_usage": json.dumps(event["llm_usage"])
+                        if event.get("llm_usage")
+                        else None,
                     },
                 )
         except Exception as exc:  # noqa: BLE001 - auditing must not break the answer

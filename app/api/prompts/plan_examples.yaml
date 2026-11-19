@@ -1,0 +1,102 @@
+# Validated example plans retrieved for the planner (assistant/retrieval.py): the two or
+# three closest to a question are shown to the model. They are written for this purpose and
+# must stay different from the evaluation questions (evals/cases.yaml), otherwise the
+# evaluation would measure memorisation; a unit test checks it.
+# Every plan must pass the validator against the published catalogue (unit test).
+
+examples:
+  - question: How many trips were there in the latest month?
+    plan: {intent: lookup, metrics: [trips], date_range: {period: latest_month}}
+
+  - question: What was the average fare in January 2025?
+    plan: {intent: lookup, metrics: [avg_fare],
+           date_range: {period: custom, start_month: "2025-01", end_month: "2025-01"}}
+
+  - question: Total revenue in June 2024
+    plan: {intent: lookup, metrics: [total_revenue],
+           date_range: {period: custom, start_month: "2024-06", end_month: "2024-06"}}
+
+  - question: Daily trips in Queens over the last three months
+    plan: {intent: trend, metrics: [trips], grain: day, date_range: {period: last_3_months},
+           filters: [{dimension: pickup_borough, operator: "=", values: [Queens]}]}
+
+  - question: Monthly total revenue trend
+    plan: {intent: trend, metrics: [total_revenue], grain: month,
+           date_range: {period: all_months}}
+
+  - question: Revenue split by pickup borough for the previous month
+    plan: {intent: breakdown, metrics: [total_revenue], dimensions: [pickup_borough],
+           date_range: {period: previous_month}}
+
+  - question: Average fare by payment type
+    plan: {intent: breakdown, metrics: [avg_fare], dimensions: [payment_type],
+           date_range: {period: latest_month}}
+
+  - question: Top 10 pickup zones by trips this month
+    plan: {intent: rank, metrics: [trips], dimensions: [pickup_zone],
+           date_range: {period: latest_month}, order: desc, limit: 10}
+
+  - question: Which 5 boroughs have the lowest average tip?
+    plan: {intent: rank, metrics: [avg_tip], dimensions: [pickup_borough],
+           date_range: {period: latest_month}, order: asc, limit: 5}
+
+  - question: Which drop-off zones grew the most compared with the month before?
+    plan: {intent: compare, metrics: [trips], dimensions: [dropoff_zone],
+           date_range: {period: latest_month}, compare_to: previous_period,
+           order: change_desc, limit: 10}
+
+  - question: Did airport trips fall in the previous month compared with the month before it?
+    plan: {intent: compare, metrics: [airport_trips], date_range: {period: previous_month},
+           compare_to: previous_period}
+
+  - question: Trips per active hour by hour of day on weekends
+    plan: {intent: breakdown, metrics: [trips_per_active_hour], dimensions: [pickup_hour],
+           date_range: {period: latest_month},
+           filters: [{dimension: day_type, operator: "=", values: [Weekend]}]}
+
+  - question: Tip rate for cash payments
+    plan: {intent: lookup, metrics: [tip_rate], date_range: {period: latest_month},
+           filters: [{dimension: payment_type, operator: "=", values: [Cash]}]}
+
+  - question: How many trips started at JFK Airport in the previous month?
+    plan: {intent: lookup, metrics: [trips], date_range: {period: previous_month},
+           filters: [{dimension: pickup_zone, operator: "=", values: [JFK Airport]}]}
+
+  - question: Average duration in the PM peak by borough
+    plan: {intent: breakdown, metrics: [avg_duration], dimensions: [pickup_borough],
+           date_range: {period: latest_month},
+           filters: [{dimension: service_period, operator: "=", values: [PM peak]}]}
+
+  - question: Valid-trip rate by vendor
+    plan: {intent: breakdown, metrics: [valid_trip_rate], dimensions: [vendor],
+           date_range: {period: latest_month}}
+
+  - question: Congestion fee revenue week by week
+    plan: {intent: trend, metrics: [congestion_fee_revenue], grain: week,
+           date_range: {period: all_months}}
+
+  - question: Estimated CO2 by pickup borough
+    plan: {intent: breakdown, metrics: [est_co2_kg], dimensions: [pickup_borough],
+           date_range: {period: latest_month}}
+
+  - question: Revenue per mile in Manhattan versus Queens
+    plan: {intent: breakdown, metrics: [revenue_per_mile], dimensions: [pickup_borough],
+           date_range: {period: latest_month},
+           filters: [{dimension: pickup_borough, operator: in, values: [Manhattan, Queens]}]}
+
+  - question: Average distance and average duration of trips from LaGuardia Airport
+    plan: {intent: lookup, metrics: [avg_distance, avg_duration],
+           date_range: {period: latest_month},
+           filters: [{dimension: pickup_zone, operator: "=", values: [LaGuardia Airport]}]}
+
+  - question: Now the same but only for the Bronx
+    plan: {intent: lookup, date_range: {period: latest_month},
+           filters: [{dimension: pickup_borough, operator: "=", values: [Bronx]}]}
+
+  - question: What do riders think about the service?
+    plan: {intent: unsupported,
+           unsupported_reason: rider satisfaction is not recorded in the trip data}
+
+  - question: Give me the numbers
+    plan: {intent: clarify,
+           clarification_question: "Which measure do you want: trips, total_revenue or avg_fare?"}

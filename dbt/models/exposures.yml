@@ -1,0 +1,94 @@
+version: 2
+
+# Lineage beyond dbt (exam Q11): which published models each consumer reads, so the dbt
+# docs graph goes from the raw source file to the dashboards and the AI assistant.
+# Consumers read copies of these models in the `analytics` schema (publication gate).
+
+exposures:
+  - name: dashboard_executive_pulse
+    label: "1. Executive Pulse"
+    type: dashboard
+    maturity: high
+    url: http://localhost:8088/superset/dashboard/executive-pulse/
+    description: Are Yellow Taxi trips and revenue healthy? Weekly and monthly trends, revenue bridge, data quality and freshness.
+    depends_on:
+      - ref('agg_trips_daily')
+      - ref('recon_bronze_silver')
+    owner:
+      name: AYEBIE GRAM MESCHAC
+
+  - name: dashboard_demand_rhythm
+    label: "2. Demand Rhythm"
+    type: dashboard
+    maturity: high
+    url: http://localhost:8088/superset/dashboard/demand-rhythm/
+    description: When should capacity and service attention increase? Hour by weekday, holidays, airport versus city.
+    depends_on:
+      - ref('agg_trips_hourly')
+    owner:
+      name: AYEBIE GRAM MESCHAC
+
+  - name: dashboard_geography_routes
+    label: "3. Geography and Route Opportunities"
+    type: dashboard
+    maturity: high
+    url: http://localhost:8088/superset/dashboard/geography-routes/
+    description: Where is the value moving? Zones, routes, growing and declining drop-off zones, borough mix.
+    depends_on:
+      - ref('agg_trips_daily')
+      - ref('agg_routes_monthly')
+    owner:
+      name: AYEBIE GRAM MESCHAC
+
+  - name: dashboard_fare_payment_signals
+    label: "4. Fare, Payment and Customer Signals"
+    type: dashboard
+    maturity: high
+    url: http://localhost:8088/superset/dashboard/fare-payment-signals/
+    description: What is changing in trip economics? Fares, tips (card trips), payment mix, rate codes, congestion fee.
+    depends_on:
+      - ref('agg_trips_daily')
+    owner:
+      name: AYEBIE GRAM MESCHAC
+
+  - name: dashboard_service_efficiency_anomalies
+    label: "5. Service Efficiency and Anomalies"
+    type: dashboard
+    maturity: high
+    url: http://localhost:8088/superset/dashboard/service-efficiency-anomalies/
+    description: Where should leaders look closer? Quality flags, vendors, reconciliation, pipeline signals, slower routes.
+    depends_on:
+      - ref('agg_quality_daily')
+      - ref('agg_trips_hourly')
+      - ref('agg_routes_monthly')
+      - ref('recon_bronze_silver')
+    owner:
+      name: AYEBIE GRAM MESCHAC
+
+  - name: dashboard_city_airport_strategy
+    label: "6. City and Airport Strategy"
+    type: dashboard
+    maturity: high
+    url: http://localhost:8088/superset/dashboard/city-airport-strategy/
+    description: What action should we take next? Airport demand, market mix, demand proxy limits, estimated CO2.
+    depends_on:
+      - ref('agg_trips_daily')
+      - ref('agg_trips_hourly')
+    owner:
+      name: AYEBIE GRAM MESCHAC
+
+  - name: ai_analytics_assistant
+    label: AI analytics assistant
+    type: application
+    maturity: medium
+    url: http://localhost:8000/docs
+    description: >
+      Natural-language questions answered from the governed metrics through approved query
+      templates (read-only role ai_reader); every answer carries its provenance.
+    depends_on:
+      - ref('agg_trips_daily')
+      - ref('agg_trips_hourly')
+      - ref('agg_routes_monthly')
+      - ref('recon_bronze_silver')
+    owner:
+      name: AYEBIE GRAM MESCHAC

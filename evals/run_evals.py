@@ -76,15 +76,21 @@ def main() -> int:
     parser.add_argument("--skip-model-down", action="store_true")
     parser.add_argument("--only-model-down", action="store_true")
     parser.add_argument("--skip-report", action="store_true")
+    parser.add_argument("--cases", help="comma-separated case ids to run, e.g. F1,F2")
     parser.add_argument("--out", default=str(ROOT / "docs/evidence/q10/eval_results.md"))
     args = parser.parse_args()
 
     cases = yaml.safe_load((ROOT / "evals/cases.yaml").read_text(encoding="utf-8"))["cases"]
-    http = httpx.Client(base_url=args.api, timeout=600,
+    # A first call can wait for the model on a CPU host: the client waits longer than the
+    # API's own model timeout, so a slow answer is measured instead of cut.
+    http = httpx.Client(base_url=args.api, timeout=1800,
                         headers={"Authorization": f"Bearer {args.token}"})
     sessions: dict[str, str] = {}
     results = []
+    only = set(args.cases.split(",")) if args.cases else None
     for case in cases:
+        if only and case["id"] not in only:
+            continue
         if case.get("model_down") and args.skip_model_down:
             continue
         if args.only_model_down and not case.get("model_down"):
@@ -120,14 +126,23 @@ def main() -> int:
         results.append({"case": case, "response": response, "ok": ok, "notes": notes,
                         "seconds": seconds})
         print(f"{case['id']:>3} {'PASS' if ok else 'FAIL'} {seconds:>6}s "
-              f"{response.get('status')} {'; '.join(notes)}")
+              f"{response.get('status')} {'; '.join(notes)}", flush=True)
 
     passed = sum(r["ok"] for r in results)
+    model_cases = [r for r in results if (r["response"].get("step_ms") or {}).get("plan")]
+    times = sorted(r["seconds"] for r in model_cases)
+    median = times[len(times) // 2] if times else 0
+    health = http.get("/health").json()
     lines = [
         "# Evaluation results (exam Q10)",
         "",
         f"Run {datetime.now(UTC):%Y-%m-%d %H:%M} UTC, prompt variant "
-        f"`{args.variant or 'default'}`. **{passed} of {len(results)} cases pass.**",
+        f"`{args.variant or 'default'}`, model `{health.get('model')}`, output mode "
+        f"`{health.get('output_mode')}`, retrieval (RAG) "
+        f"`{'on' if health.get('retrieval') else 'off'}`. "
+        f"**{passed} of {len(results)} cases pass.** "
+        f"Median time of the cases that called the model: {median} s "
+        f"({len(model_cases)} cases).",
         "",
         "| Case | Category | Question | Expected | Observed | Plan | Narrative check | Time | Result |",
         "|---|---|---|---|---|---|---|---|---|",

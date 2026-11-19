@@ -14,7 +14,9 @@ Rules:
   is too vague to choose a metric), unsupported (the data cannot answer).
 - Periods are words, never dates you compute: latest_month ("this month", "latest"),
   previous_month ("last month"), last_3_months, all_months, or custom with start_month
-  and end_month as YYYY-MM when the manager names months.
+  and end_month as YYYY-MM when the manager names months (even a month that may not be
+  published: the platform checks coverage). A period never goes in filters.
+- Add a filter only when the question names a value; never add filters on your own.
 - "Biggest drop" means intent compare with order change_asc; "biggest increase" means
   order change_desc.
 - If the question asks about driver earnings, wait times, cancellations, rider

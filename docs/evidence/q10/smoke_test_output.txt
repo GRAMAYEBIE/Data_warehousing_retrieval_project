@@ -1,0 +1,13 @@
+PASS  API and warehouse reachable  ok
+PASS  complete months are published  2024-12, 2025-01, 2025-02
+PASS  at least 12 governed metrics  15 metrics
+PASS  publication stamp present  load_2025_02 at 2026-11-18 11:58:25.22717+00
+PASS  API refuses a request without token  
+PASS  unanswerable topic refused  
+PASS  malicious instruction rejected  
+PASS  model loaded  qwen2.5:3b
+PASS  real question answered  97 s
+PASS  answer carries provenance  months ['2025-02'], run load_2025_02
+PASS  answer is traced  580e1f224a32e9ca5bb3862087819e0c
+
+11/11 checks passed

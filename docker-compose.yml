@@ -100,7 +100,11 @@ services:
     command:
       - postgres
       - -c
-      - shared_preload_libraries=pg_stat_statements
+      # pg_prewarm: the views the assistant and Superset read are loaded into shared_buffers
+      # after a publication and reloaded automatically after a restart (autoprewarm), so a
+      # question does not wait for the disk (observed: 11 s for a one-month total when the
+      # model's 2.3 GB had pushed the data out of memory, beyond the assistant's 10 s limit).
+      - shared_preload_libraries=pg_stat_statements,pg_prewarm
       - -c
       - shared_buffers=512MB
       - -c
@@ -386,6 +390,8 @@ services:
       PROMPT_VARIANT: ${PROMPT_VARIANT:-v3_structured_examples}
       OLLAMA_NUM_THREAD: ${OLLAMA_NUM_THREAD:-0}
       LLM_OUTPUT_MODE: ${LLM_OUTPUT_MODE:-free}
+      LLM_MAX_CONCURRENCY: ${LLM_MAX_CONCURRENCY:-1}
+      ASSISTANT_RAG: ${ASSISTANT_RAG:-true}
       LLM_TIMEOUT_S: ${LLM_TIMEOUT_S:-900}
       API_TOKEN: ${API_TOKEN}
       SUPERSET_URL: http://superset:8088

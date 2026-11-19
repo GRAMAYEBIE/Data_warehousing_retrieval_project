@@ -80,6 +80,7 @@ def health() -> dict:
         "model": assistant.settings.model,
         "model_available": assistant.llm.available(),
         "output_mode": assistant.llm.output_mode,
+        "retrieval": assistant.settings.rag,
         "prompt_cache_warm_up": WARM_UP,
         "complete_months": months,
     }

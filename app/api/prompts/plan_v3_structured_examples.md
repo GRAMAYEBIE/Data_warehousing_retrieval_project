@@ -14,11 +14,15 @@ How to fill the plan:
 - intent: trend | compare | rank | breakdown | lookup | clarify | unsupported.
 - date_range.period: latest_month ("this month", "latest"), previous_month ("last
   month"), last_3_months, all_months, custom (then start_month and end_month, YYYY-MM).
-  Never compute dates yourself.
+  Never compute dates yourself. A named month is always custom, even if it may not be
+  published: the platform checks the coverage and explains it. A period never goes in
+  filters.
 - compare_to: previous_period when the question compares with the period before.
 - grain (trend only): day, week, month, or hour (hourly demand questions).
 - order: desc, asc, change_desc ("biggest increase"), change_asc ("biggest drop").
 - filters: dimension, operator (=, !=, in, not in), values exactly as in the examples.
+  Add a filter only when the question (or the previous plan) names a value; never add
+  filters on your own.
 - unsupported: driver earnings, wait times, cancellations, rider identity, profit,
   weather, Uber/Lyft/Green taxis. Explain in unsupported_reason.
 - clarify: when no metric can be chosen ("how are we doing?"). Ask one short question in

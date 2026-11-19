@@ -59,3 +59,19 @@ only; the rows are kept here to prove both surfaces treat them identically.
 | 2025-03 (partial) | `trips_per_active_hour` | 1 | 1 | not shown (partial month) | match |
 | 2025-03 (partial) | `congestion_fee_revenue` | 0.75 | 0.75 | not shown (partial month) | match |
 | 2025-03 (partial) | `est_co2_kg` | 1.296 | 1.296 | not shown (partial month) | match |
+
+## Fourth surface: the AI assistant (2026-11-19 15:00 UTC)
+
+The question is asked in plain English to the running assistant (qwen2.5:3b, prompt
+v3, retrieval on) by `tests/consistency/assistant_parity.py`; its value is compared with
+the MetricFlow value of the table above (relative tolerance 1e-6; MetricFlow rounds the
+average to six decimals, the assistant returns the database value unrounded).
+
+| Month | Metric | Question | MetricFlow | Assistant | Plan and months | Result |
+|---|---|---|---|---|---|---|
+| 2025-01 | `trips` | How many trips did we have in January 2025? | 3177899 | 3177899 | ['trips'] ['2025-01'] | match |
+| 2025-01 | `total_revenue` | What was the total revenue in January 2025? | 84627384.68 | 84627384.68 | ['total_revenue'] ['2025-01'] | match |
+| 2025-01 | `avg_fare` | What was the average fare in January 2025? | 17.727939 | 17.7279391384055944 | ['avg_fare'] ['2025-01'] | match |
+
+3/3 match: the same governed metric returns the same value in MetricFlow (dbt), the
+published SQL, Superset and the AI assistant.

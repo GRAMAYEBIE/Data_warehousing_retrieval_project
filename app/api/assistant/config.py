@@ -21,9 +21,11 @@ class Settings:
     llm_threads: int  # 0: Ollama decides
     llm_keep_alive: str  # "-1": keep the model loaded
     llm_output_mode: str  # schema | json | free (see Ollama.structured)
+    llm_concurrency: int  # model calls at the same time: 1 on a CPU, more on a GPU
     superset_url: str
     superset_user: str
     superset_password: str
+    rag: bool = True  # retrieval of named values and similar examples for the planner
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -41,6 +43,8 @@ class Settings:
             llm_threads=int(os.environ.get("OLLAMA_NUM_THREAD", "0")),
             llm_keep_alive=os.environ.get("OLLAMA_KEEP_ALIVE", "-1"),
             llm_output_mode=os.environ.get("LLM_OUTPUT_MODE", "free"),
+            llm_concurrency=int(os.environ.get("LLM_MAX_CONCURRENCY", "1")),
+            rag=os.environ.get("ASSISTANT_RAG", "true").lower() == "true",
             superset_url=os.environ.get("SUPERSET_URL", "http://superset:8088").rstrip("/"),
             superset_user=os.environ.get("SUPERSET_AI_USER", "ai_builder"),
             superset_password=os.environ.get("SUPERSET_AI_PASSWORD", ""),

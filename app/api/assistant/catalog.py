@@ -14,19 +14,18 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-COMPLETE_MONTHS = "d.month_start IN (SELECT source_month FROM analytics.recon_bronze_silver)"
+# The views already hold complete months only; the condition is repeated as a safeguard.
+COMPLETE_MONTHS = "a.month_start IN (SELECT source_month FROM analytics.recon_bronze_silver)"
 
+# Each relation reads one BI materialized view (aggregate + dimensions already joined,
+# indexed, rebuilt at each publication): measured 0.10 s instead of 0.83 s with five joins
+# for the same breakdown, which matters under the assistant's 10 s statement limit.
 RELATIONS: dict[str, dict] = {
     "daily": {
         "base_table": "analytics.agg_trips_daily",
-        "from": """analytics.agg_trips_daily AS a
-JOIN analytics.dim_date AS d ON a.pickup_date_sk = d.date_sk
-JOIN analytics.dim_zone AS z ON a.pickup_zone_sk = z.zone_sk
-JOIN analytics.dim_payment_type AS p ON a.payment_type_sk = p.payment_type_sk
-JOIN analytics.dim_rate_code AS r ON a.rate_code_sk = r.rate_code_sk
-JOIN analytics.dim_vendor AS v ON a.vendor_sk = v.vendor_sk""",
+        "from": "analytics.mv_trips_daily AS a",
         "where": COMPLETE_MONTHS,
-        "date": "d.date_day",
+        "date": "a.date_day",
         "columns": {
             "trip_count",
             "airport_trip_count",
@@ -52,12 +51,9 @@ JOIN analytics.dim_vendor AS v ON a.vendor_sk = v.vendor_sk""",
     },
     "hourly": {
         "base_table": "analytics.agg_trips_hourly",
-        "from": """analytics.agg_trips_hourly AS a
-JOIN analytics.dim_date AS d ON a.pickup_date_sk = d.date_sk
-JOIN analytics.dim_zone AS z ON a.pickup_zone_sk = z.zone_sk
-JOIN analytics.dim_service_period AS sp ON a.service_period_sk = sp.service_period_sk""",
+        "from": "analytics.mv_trips_hourly AS a",
         "where": COMPLETE_MONTHS,
-        "date": "d.date_day",
+        "date": "a.date_day",
         "columns": {
             "trip_count",
             "sum_total_amount",
@@ -70,11 +66,7 @@ JOIN analytics.dim_service_period AS sp ON a.service_period_sk = sp.service_peri
     },
     "routes": {
         "base_table": "analytics.agg_routes_monthly",
-        "from": """analytics.agg_routes_monthly AS a
-JOIN analytics.dim_zone AS z ON a.pickup_zone_sk = z.zone_sk
-JOIN analytics.dim_zone AS dz ON a.dropoff_zone_sk = dz.zone_sk
-JOIN analytics.dim_service_period AS sp ON a.service_period_sk = sp.service_period_sk
-CROSS JOIN LATERAL (SELECT 'valid'::text AS quality_status) AS q""",
+        "from": "analytics.mv_routes_monthly AS a",
         "where": "a.pickup_month IN (SELECT source_month FROM analytics.recon_bronze_silver)",
         "date": "a.pickup_month",
         "columns": {
@@ -92,6 +84,10 @@ CROSS JOIN LATERAL (SELECT 'valid'::text AS quality_status) AS q""",
 }
 
 
+def _everywhere(column: str) -> dict[str, str]:
+    return {"daily": column, "hourly": column, "routes": column}
+
+
 @dataclass(frozen=True)
 class Dimension:
     name: str
@@ -103,37 +99,23 @@ class Dimension:
 DIMENSIONS: dict[str, Dimension] = {
     d.name: d
     for d in [
+        Dimension("pickup_borough", _everywhere("a.pickup_borough"), "Pickup borough"),
+        Dimension("pickup_zone", _everywhere("a.pickup_zone"), "Pickup zone"),
         Dimension(
-            "pickup_borough",
-            {"daily": "z.borough", "hourly": "z.borough", "routes": "z.borough"},
-            "Pickup borough",
+            "pickup_market_segment", _everywhere("a.pickup_market_segment"), "Market segment"
         ),
-        Dimension(
-            "pickup_zone",
-            {"daily": "z.zone_name", "hourly": "z.zone_name", "routes": "z.zone_name"},
-            "Pickup zone",
-        ),
-        Dimension(
-            "pickup_market_segment",
-            {
-                "daily": "z.market_segment",
-                "hourly": "z.market_segment",
-                "routes": "z.market_segment",
-            },
-            "Market segment",
-        ),
-        Dimension("dropoff_borough", {"routes": "dz.borough"}, "Dropoff borough"),
-        Dimension("dropoff_zone", {"routes": "dz.zone_name"}, "Dropoff zone"),
-        Dimension("route", {"routes": "z.zone_name || ' -> ' || dz.zone_name"}, "Route"),
-        Dimension("payment_type", {"daily": "p.payment_type_name"}, "Payment type"),
-        Dimension("rate_code", {"daily": "r.rate_code_name"}, "Rate code"),
-        Dimension("vendor", {"daily": "v.vendor_name"}, "Vendor"),
-        Dimension("day_type", {"daily": "d.day_type", "hourly": "d.day_type"}, "Day type"),
-        Dimension("day_of_week", {"daily": "d.day_name", "hourly": "d.day_name"}, "Day of week"),
+        Dimension("dropoff_borough", {"routes": "a.dropoff_borough"}, "Dropoff borough"),
+        Dimension("dropoff_zone", {"routes": "a.dropoff_zone"}, "Dropoff zone"),
+        Dimension("route", {"routes": "a.route"}, "Route"),
+        Dimension("payment_type", {"daily": "a.payment_type_name"}, "Payment type"),
+        Dimension("rate_code", {"daily": "a.rate_code_name"}, "Rate code"),
+        Dimension("vendor", {"daily": "a.vendor_name"}, "Vendor"),
+        Dimension("day_type", {"daily": "a.day_type", "hourly": "a.day_type"}, "Day type"),
+        Dimension("day_of_week", {"daily": "a.day_name", "hourly": "a.day_name"}, "Day of week"),
         Dimension("pickup_hour", {"hourly": "a.pickup_hour"}, "Pickup hour", False),
         Dimension(
             "service_period",
-            {"hourly": "sp.service_period_name", "routes": "sp.service_period_name"},
+            {"hourly": "a.service_period_name", "routes": "a.service_period_name"},
             "Service period",
         ),
         Dimension("is_airport_trip", {"hourly": "a.is_airport_trip"}, "Airport trip"),
@@ -141,9 +123,9 @@ DIMENSIONS: dict[str, Dimension] = {
 }
 
 GRAIN_SQL = {
-    "day": "d.date_day",
-    "week": "d.week_start",
-    "month": "d.month_start",
+    "day": "a.date_day",
+    "week": "a.week_start",
+    "month": "a.month_start",
 }
 
 # Topics the data cannot answer (exam: do not claim them without an external source).

@@ -288,12 +288,33 @@ def create_bi_views(cur) -> dict[str, int]:
     return counts
 
 
+# Views read on every question or chart, loaded into PostgreSQL's memory after a
+# publication (pg_prewarm), largest last so the smaller ones are certainly kept.
+PREWARMED = ("mv_routes_monthly", "mv_trips_daily", "mv_trips_hourly")
+
+
+def prewarm_bi_views(conn) -> dict[str, int]:
+    """Best effort, after the commit: the publication never fails because of it."""
+    loaded = {}
+    try:
+        with conn.cursor() as cur:
+            for name in PREWARMED:
+                cur.execute("SELECT util.pg_prewarm(%s::regclass)", (f"analytics.{name}",))
+                loaded[name] = cur.fetchone()[0]  # blocks loaded
+        conn.commit()
+    except Exception as exc:  # noqa: BLE001 - e.g. pg_prewarm not installed
+        conn.rollback()
+        log.warning("BI views not prewarmed: %s", exc)
+    return loaded
+
+
 def rebuild_bi_views(conn) -> dict[str, int]:
     """Rebuild the BI views alone (one transaction), e.g. after changing their definition."""
     with conn.cursor() as cur:
         drop_bi_views(cur)
         counts = create_bi_views(cur)
     conn.commit()
+    prewarm_bi_views(conn)
     log.info("BI materialized views rebuilt: %s", counts)
     return counts
 
@@ -413,6 +434,7 @@ def publish(conn, run_id: str) -> dict:
         counts |= create_bi_views(cur)
     conn.commit()
     log.info("published %s tables for run %s: %s", len(counts), run_id, counts)
+    log.info("BI views loaded in memory (blocks): %s", prewarm_bi_views(conn))
     return {"tables": counts, "batches": batches}
 
 

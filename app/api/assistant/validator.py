@@ -18,6 +18,26 @@ class PlanRejected(Exception):
         super().__init__("; ".join(reasons))
         self.reasons = reasons
 
+    @property
+    def repairable(self) -> bool:
+        """True when every reason is a vocabulary mistake of the model (an unknown metric,
+        dimension or filter value, a combination no table holds), which one re-plan with
+        the reasons can fix. A date outside the coverage, conflicting filters or a missing
+        previous period are real limits of the request: they are explained, never
+        "repaired", because repairing them would change what the manager asked."""
+        return bool(self.reasons) and all(r.startswith(REPAIRABLE) for r in self.reasons)
+
+
+REPAIRABLE = (
+    "unknown metric",
+    "unknown dimension",
+    "unknown filter dimension",
+    "invalid filter",
+    "no metric requested",
+    "no published table can compute",
+    "not grounded",
+)
+
 
 @dataclass
 class ResolvedPlan:

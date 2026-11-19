@@ -5,12 +5,16 @@ answer with a clear degraded message instead of an error page."""
 from __future__ import annotations
 
 import json
+import threading
 from pathlib import Path
 
 import httpx
 from pydantic import BaseModel, ValidationError
 
+from assistant import telemetry
+
 PROMPTS = Path(__file__).resolve().parents[1] / "prompts"
+PLAN_MAX_TOKENS = 400  # a report request with three extra charts stays below this
 
 
 class ModelUnavailable(Exception):
@@ -18,7 +22,9 @@ class ModelUnavailable(Exception):
 
 
 class MalformedOutput(Exception):
-    pass
+    def __init__(self, message: str, syntax: bool = False) -> None:
+        super().__init__(message)
+        self.syntax = syntax  # True: not JSON at all; False: JSON that is not a valid plan
 
 
 class Ollama:
@@ -35,11 +41,17 @@ class Ollama:
         threads: int = 0,
         keep_alive: str = "-1",
         output_mode: str = "free",
+        concurrency: int = 1,
     ) -> None:
         self.url, self.model = url, model
         self.threads, self.keep_alive = threads, keep_alive
         self.output_mode = output_mode
         self.http = httpx.Client(timeout=timeout_s)
+        # Calls to the model at the same time. On a CPU host, two calls share the cores and
+        # both slow down (observed: the start-up warm-up and the first question together
+        # took more than 15 minutes, and PostgreSQL queries slowed down with them); on a
+        # GPU host it can be raised (LLM_MAX_CONCURRENCY).
+        self.slots = threading.BoundedSemaphore(max(1, concurrency))
 
     def available(self) -> bool:
         try:
@@ -70,7 +82,8 @@ class Ollama:
         if schema is not None:
             body["format"] = schema  # structured output: the reply must match the schema
         try:
-            response = self.http.post(f"{self.url}/api/chat", json=body)
+            with self.slots:  # waits for its turn; the wait counts in the caller's timings
+                response = self.http.post(f"{self.url}/api/chat", json=body)
             response.raise_for_status()
         except httpx.HTTPStatusError as exc:
             # Ollama explains a refused request in its body: keep it for the audit log.
@@ -80,15 +93,23 @@ class Ollama:
             ) from exc
         except httpx.HTTPError as exc:
             raise ModelUnavailable(f"language model unavailable: {type(exc).__name__}") from exc
-        return response.json()["message"]["content"]
+        payload = response.json()
+        telemetry.record_llm_call(payload)
+        return payload["message"]["content"]
 
     def planner_system(self, system: str, model_cls: type[BaseModel]) -> str:
-        """Outside "schema" mode the decoder does not enforce the schema, so it is given as
-        text. It is part of the system prompt: Ollama reads it once and keeps it cached."""
+        """Outside "schema" mode the decoder does not enforce the schema, so the fields are
+        given as text: a compact list generated from the Pydantic model (one source of
+        truth), not the raw JSON schema, which a 3B model tended to copy or fill entirely
+        (observed: a 1,500-character plan cut at the token limit). It is part of the system
+        prompt: Ollama reads it once and keeps it cached."""
         if self.output_mode == "schema":
             return system
-        schema = json.dumps(model_cls.model_json_schema(), separators=(",", ":"))
-        return f"{system}\n\nReply with ONE JSON object only, matching this JSON schema:\n{schema}"
+        return (
+            f"{system}\n\nReply with ONE JSON object only. Fields (write only the ones the "
+            "question needs; every other field keeps its default):\n"
+            + compact_fields(model_cls.model_json_schema())
+        )
 
     def warm_up(self, system: str) -> None:
         """Read a system prompt into Ollama's cache (one output token)."""
@@ -107,7 +128,9 @@ class Ollama:
         """
         fmt = {"schema": model_cls.model_json_schema(), "json": "json"}.get(self.output_mode)
         system = self.planner_system(system, model_cls)
-        raw = self.chat(system, user, schema=fmt)
+        # A plan is 20 to 60 tokens; without a decoding constraint nothing else stops a model
+        # that keeps writing after its JSON, so the output is capped.
+        raw = self.chat(system, user, schema=fmt, max_tokens=PLAN_MAX_TOKENS)
         try:
             return parse_plan(raw, model_cls)
         except MalformedOutput as first:
@@ -115,7 +138,47 @@ class Ollama:
                 f"{user}\n\nYour previous reply was not a valid plan ({first}). "
                 "Reply again with only the corrected JSON object."
             )
-            return parse_plan(self.chat(system, repair, schema=fmt), model_cls)
+            # A JSON syntax error is repaired under Ollama's JSON grammar, which makes a
+            # second syntax error impossible (observed in the baseline evaluation: the same
+            # missing comma twice); the fast free decoding stays the normal path.
+            retry_fmt = "json" if first.syntax and fmt is None else fmt
+            fixed = self.chat(system, repair, schema=retry_fmt, max_tokens=PLAN_MAX_TOKENS)
+            return parse_plan(fixed, model_cls)
+
+
+def compact_fields(schema: dict) -> str:
+    """'- intent: trend|compare|... (required)' lines from a JSON schema, nested objects
+    and lists of objects inline, so a small model sees names and allowed values only."""
+    defs = schema.get("$defs", {})
+
+    def resolve(node: dict) -> dict:
+        if "$ref" in node:
+            return resolve(defs[node["$ref"].split("/")[-1]])
+        if "anyOf" in node:  # Optional[X]: keep X
+            options = [o for o in node["anyOf"] if o.get("type") != "null"]
+            return resolve(options[0]) if options else node
+        if "allOf" in node and len(node["allOf"]) == 1:
+            return resolve(node["allOf"][0])
+        return node
+
+    def kind(node: dict) -> str:
+        node = resolve(node)
+        if "enum" in node:
+            return "|".join(map(str, node["enum"]))
+        if "const" in node:
+            return str(node["const"])
+        if node.get("type") == "object" and "properties" in node:
+            inner = ", ".join(f"{k}: {kind(v)}" for k, v in node["properties"].items())
+            return "{" + inner + "}"
+        if node.get("type") == "array":
+            return f"[{kind(node.get('items', {}))}]"
+        return node.get("type", "value")
+
+    required = set(schema.get("required", []))
+    return "\n".join(
+        f"- {name}: {kind(prop)}" + (" (required)" if name in required else "")
+        for name, prop in schema.get("properties", {}).items()
+    )
 
 
 def parse_plan(raw: str, model_cls: type[BaseModel]) -> BaseModel:
@@ -123,11 +186,13 @@ def parse_plan(raw: str, model_cls: type[BaseModel]) -> BaseModel:
     fence), validated against the Pydantic model."""
     start, end = raw.find("{"), raw.rfind("}")
     if start < 0 or end <= start:
-        raise MalformedOutput(f"no JSON object in the reply: {raw[:120]!r}")
+        raise MalformedOutput(f"no JSON object in the reply (began: {raw[:160]!r})", True)
     try:
         return model_cls.model_validate(json.loads(raw[start : end + 1]))
     except json.JSONDecodeError as exc:
-        raise MalformedOutput(f"invalid JSON: {exc.msg} at character {exc.pos}") from exc
+        raise MalformedOutput(
+            f"invalid JSON: {exc.msg} at character {exc.pos} (reply began: {raw[:160]!r})", True
+        ) from exc
     except ValidationError as exc:
         # Field and reason, so the repair attempt knows exactly what to change.
         problems = "; ".join(
@@ -154,6 +219,8 @@ def planning_prompt(variant: str, catalog_summary: str) -> str:
     return load_prompt(f"plan_{variant}").format(catalog=catalog_summary)
 
 
-def planning_message(context: str, question: str) -> str:
-    """User message of the planner: what changes from one question to the next."""
-    return f"CONTEXT:\n{context}\n\nQUESTION: {question}"
+def planning_message(context: str, question: str, retrieved: str = "") -> str:
+    """User message of the planner: what changes from one question to the next (context,
+    retrieved vocabulary and examples, question), after the cached system prompt."""
+    middle = f"\n\n{retrieved}" if retrieved else ""
+    return f"CONTEXT:\n{context}{middle}\n\nQUESTION: {question}"

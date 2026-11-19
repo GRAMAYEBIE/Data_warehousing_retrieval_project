@@ -89,6 +89,40 @@ def unsupported_numbers(
     return found
 
 
+HIGH_WORDS = ("highest", "most", "largest", "biggest", "top", "leading", "led ", "greatest")
+LOW_WORDS = ("lowest", "least", "smallest", "fewest", "bottom", "weakest")
+
+
+def wrong_rankings(narrative: str, columns: list[str], rows: list[list], metric: str) -> list[str]:
+    """Superlative claims about a member that the result contradicts.
+
+    The number check cannot see them: "Brooklyn had the lowest revenue at $1.85 million"
+    quotes a true number but is false when the Bronx is lower (observed on the first real
+    test). In each sentence with a superlative and exactly one member of the first
+    dimension, that member must be the maximum (or the minimum) of the metric.
+    """
+    dims = [c for c in columns if c != metric and not c.startswith(metric)]
+    if metric not in columns or not dims or len(rows) < 2:
+        return []
+    m, d = columns.index(metric), columns.index(dims[0])
+    values = {str(r[d]): float(r[m]) for r in rows if r[m] is not None}
+    if len(values) < 2:
+        return []
+    highest, lowest = max(values, key=values.get), min(values, key=values.get)
+    problems = []
+    for sentence in re.split(r"(?<=[.!?;])\s+", narrative):
+        text = sentence.lower()
+        named = [name for name in values if re.search(rf"\b{re.escape(name.lower())}\b", text)]
+        if len(named) != 1:
+            continue  # several members in one sentence: the claim is not attributable
+        name = named[0]
+        if any(w in text for w in LOW_WORDS) and name != lowest:
+            problems.append(f"'{name}' called lowest, but the lowest is '{lowest}'")
+        elif any(w in text for w in HIGH_WORDS) and name != highest:
+            problems.append(f"'{name}' called highest, but the highest is '{highest}'")
+    return problems
+
+
 def format_value(value, unit: str) -> str:
     if value is None:
         return "no value"

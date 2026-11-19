@@ -26,6 +26,8 @@ CREATE TABLE IF NOT EXISTS ops.ai_audit_log (
 -- Observability: duration of each step and the OpenTelemetry trace of the answer.
 ALTER TABLE ops.ai_audit_log ADD COLUMN IF NOT EXISTS step_ms jsonb;   -- {"plan": 41234, ...}
 ALTER TABLE ops.ai_audit_log ADD COLUMN IF NOT EXISTS trace_id text;   -- 32 hex characters
+-- Model usage per step: calls, tokens read now (cached ones not counted), tokens written.
+ALTER TABLE ops.ai_audit_log ADD COLUMN IF NOT EXISTS llm_usage jsonb;
 CREATE INDEX IF NOT EXISTS ai_audit_log_session_idx ON ops.ai_audit_log (session_id, created_at);
 CREATE INDEX IF NOT EXISTS ai_audit_log_trace_idx ON ops.ai_audit_log (trace_id);
 COMMENT ON TABLE ops.ai_audit_log IS

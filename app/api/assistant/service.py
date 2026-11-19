@@ -11,9 +11,10 @@ import time
 import uuid
 from dataclasses import dataclass, field
 
-from assistant import guards, telemetry
-from assistant.catalog import Catalog, load_catalog
+from assistant import guards, retrieval, telemetry
+from assistant.catalog import RELATIONS, Catalog, load_catalog
 from assistant.config import Settings
+from assistant.grounding import ground, named_period
 from assistant.llm import (
     MalformedOutput,
     ModelUnavailable,
@@ -28,12 +29,13 @@ from assistant.schemas import (
     Filter,
     Intent,
     MetricProvenance,
+    Period,
     Provenance,
     QueryPlan,
     ReportRequest,
 )
 from assistant.store import Store
-from assistant.validator import PlanRejected, validate
+from assistant.validator import PlanRejected, resolve_months, validate
 
 LIMITATIONS = [
     "Trip volume is a proxy for demand: unserved demand is not visible.",
@@ -61,6 +63,7 @@ class Assistant:
             settings.llm_threads,
             settings.llm_keep_alive,
             settings.llm_output_mode,
+            settings.llm_concurrency,
         )
         self.store = store or Store(settings)
         self.sessions: dict[str, Session] = {}
@@ -115,24 +118,49 @@ class Assistant:
         session: Session,
         variant: str | None = None,
         model_cls: type[QueryPlan] = QueryPlan,
+        rejected: tuple[QueryPlan, list[str]] | None = None,
     ) -> QueryPlan:
+        """The model's plan. `rejected` (a plan and the validator's reasons) asks for one
+        corrected plan of the same question."""
         system = planning_prompt(variant or self.settings.prompt_variant, self.catalog().summary())
-        return self.llm.structured(
-            system, planning_message(self.context(session), question), model_cls
+        retrieved = (
+            retrieval.retrieved_context(question, self.catalog()) if self.settings.rag else ""
         )
+        message = planning_message(self.context(session), question, retrieved)
+        if rejected:
+            previous, reasons = rejected
+            message += (
+                "\n\nYour previous plan for this QUESTION was rejected by the validator:\n- "
+                + "\n- ".join(reasons)
+                + f"\nRejected plan: {previous.model_dump_json(exclude_defaults=True)}\n"
+                "Return a corrected plan for the same QUESTION. Use only names and values of "
+                "the vocabulary, and do not add filters the question does not ask for."
+            )
+        return self.llm.structured(system, message, model_cls)
 
     def plan_report(self, question: str) -> ReportRequest:
         """A report request: the planning prompt plus the report instructions (exam Q8)."""
         system = planning_prompt(self.settings.prompt_variant, self.catalog().summary())
         system += load_prompt("report")
+        retrieved = (
+            retrieval.retrieved_context(question, self.catalog()) if self.settings.rag else ""
+        )
         return self.llm.structured(
-            system, planning_message(self.context(Session("r")), question), ReportRequest
+            system,
+            planning_message(self.context(Session("r")), question, retrieved),
+            ReportRequest,
         )
 
     def warm_up(self) -> dict[str, int]:
         """Read the planner and narrator system prompts into Ollama's cache, so the first
         real question pays only its own tokens (measured: 75 s cold, 3 to 8 s cached)."""
         timings: dict[str, int] = {}
+        with telemetry.step("warm_up_data", timings):
+            try:  # the views of the query templates, into PostgreSQL's memory
+                views = sorted({spec["from"].split()[0] for spec in RELATIONS.values()})
+                print(f"views loaded in memory (blocks): {self.store.prewarm(views)}")
+            except Exception as exc:  # noqa: BLE001 - pg_prewarm missing: only slower questions
+                print(f"views not prewarmed: {exc}")
         system = planning_prompt(self.settings.prompt_variant, self.catalog().summary())
         with telemetry.step("warm_up_planner", timings):
             self.llm.warm_up(self.llm.planner_system(system, QueryPlan))
@@ -165,6 +193,7 @@ class Assistant:
                 "assistant.model": self.settings.model,
             },
         ) as span:
+            telemetry.start_usage()
             answer = self._ask(question, session_id, variant, {})
             span.set_attribute("assistant.session_id", answer.session_id)
             span.set_attribute("assistant.status", answer.status)
@@ -187,6 +216,7 @@ class Assistant:
             answer.active_filters = list(session.active_filters)
             answer.step_ms = dict(timings)
             answer.trace_id = telemetry.current_trace_id()
+            answer.llm_usage = telemetry.current_usage()
             self.store.audit(
                 **base,
                 verdict=answer.status,
@@ -195,6 +225,7 @@ class Assistant:
                 duration_ms=answer.duration_ms,
                 step_ms=answer.step_ms,
                 trace_id=answer.trace_id,
+                llm_usage=answer.llm_usage,
                 **audit,
             )
             return answer
@@ -260,6 +291,25 @@ class Assistant:
                 )
             )
 
+        # A month the question names is checked by code, whatever the model concluded: a
+        # month outside the published coverage gets the coverage as the reason, not a
+        # vague "unsupported" (observed: "trips in March 2023" called unsupported).
+        cat = self.catalog()
+        named = named_period(question)
+        if plan.intent == Intent.unsupported and named and named.period == Period.custom:
+            try:
+                resolve_months(QueryPlan(intent=Intent.lookup, date_range=named), cat.months)
+            except PlanRejected as exc:
+                return finish(
+                    Answer(
+                        session_id=session.session_id,
+                        status="rejected",
+                        question=question,
+                        plan=plan,
+                        reasons=exc.reasons,
+                        narrative="I cannot answer this as asked: " + "; ".join(exc.reasons) + ".",
+                    )
+                )
         if plan.intent == Intent.unsupported:
             return finish(
                 Answer(
@@ -283,23 +333,67 @@ class Assistant:
                 )
             )
 
-        # 3. Validation and policy.
-        plan = self.merge_follow_up(plan, session)
-        try:
-            with telemetry.step("validate", timings):
-                resolved = validate(plan, self.catalog())
-                built = build(resolved, self.catalog(), self.settings.max_rows)
-        except PlanRejected as exc:
+        # 3. Grounding in the question, validation and policy, with one repair for
+        # vocabulary mistakes of the model.
+        context_filters = list(session.active_filters) + (
+            list(session.last_plan.filters) if session.last_plan else []
+        )
+        grounded = ground(
+            self.merge_follow_up(plan, session), question, cat, context_filters, session.last_plan
+        )
+        plan, adjusted = grounded.plan, list(grounded.notes)
+        repaired: list[str] = []
+
+        def rejected_answer(reasons: list[str], shown: QueryPlan) -> Answer:
             return finish(
                 Answer(
                     session_id=session.session_id,
                     status="rejected",
                     question=question,
-                    plan=plan,
-                    reasons=exc.reasons,
-                    narrative="I cannot answer this as asked: " + "; ".join(exc.reasons) + ".",
+                    plan=shown,
+                    reasons=reasons,
+                    narrative="I cannot answer this as asked: " + "; ".join(reasons) + ".",
                 )
             )
+
+        try:
+            with telemetry.step("validate", timings):
+                if grounded.missing:
+                    raise PlanRejected(grounded.missing)
+                resolved = validate(plan, cat)
+                built = build(resolved, cat, self.settings.max_rows)
+        except PlanRejected as exc:
+            if not exc.repairable:
+                return rejected_answer(exc.reasons, plan)
+            try:
+                with telemetry.step("repair", timings):
+                    fixed = self.plan(question, session, variant, rejected=(plan, exc.reasons))
+                if fixed.intent in (Intent.clarify, Intent.unsupported):
+                    return rejected_answer(exc.reasons, plan)
+                regrounded = ground(
+                    self.merge_follow_up(fixed, session),
+                    question,
+                    cat,
+                    context_filters,
+                    session.last_plan,
+                )
+                fixed = regrounded.plan
+                with telemetry.step("validate_repaired", timings):
+                    if regrounded.missing:
+                        raise PlanRejected(regrounded.missing)
+                    resolved = validate(fixed, cat)
+                    built = build(resolved, cat, self.settings.max_rows)
+                adjusted += regrounded.notes
+            except PlanRejected as again:
+                return rejected_answer(
+                    exc.reasons + [f"still invalid after one repair: {r}" for r in again.reasons],
+                    plan,
+                )
+            except (ModelUnavailable, MalformedOutput):
+                return rejected_answer(exc.reasons, plan)
+            except UnsafeSQL as unsafe:
+                return rejected_answer([f"SQL guard: {unsafe}"], fixed)
+            plan, repaired = fixed, exc.reasons
         except UnsafeSQL as exc:
             return finish(
                 Answer(
@@ -362,8 +456,16 @@ class Assistant:
 
         # 5. Narrative from the result only, then the number check.
         with telemetry.step("narrate", timings) as span:
-            narrative, check = self.narrate(question, plan, columns, rows, period, filters)
+            narrative, check, rejected = self.narrate(
+                question, plan, columns, rows, period, filters
+            )
             span.set_attribute("assistant.narrative_check", check)
+        # A replaced narrative is kept with the numbers that were not in the result, so the
+        # evaluation can show what the guard caught (exam Q10, hallucination risk). A plan
+        # repaired after validation says so, with the reasons of the first rejection.
+        reasons = [f"plan adjusted: {note}" for note in adjusted]
+        reasons += [f"plan repaired after validation: {r}" for r in repaired]
+        reasons += [rejected] if rejected else []
         answer = Answer(
             session_id=session.session_id,
             status="answered",
@@ -373,6 +475,7 @@ class Assistant:
             rows=rows,
             narrative=narrative,
             narrative_check=check,
+            reasons=reasons,
             suggested_chart=self.suggest_chart(plan, built.kind),
             suggested_followup=self.suggest_followup(plan),
             limitations=self.limitations(plan),
@@ -381,12 +484,26 @@ class Assistant:
         return finish(answer, rendered_sql=rendered, row_count=len(rows), narrative_check=check)
 
     # ------------------------------------------------------------------ helpers
-    def narrate(self, question, plan, columns, rows, period, filters) -> tuple[str, str]:
+    def narrate(
+        self, question, plan, columns, rows, period, filters
+    ) -> tuple[str, str, str | None]:
+        """(narrative, check, rejected): the model's text when every number in it is in the
+        result, otherwise the deterministic summary and why the model's text was rejected."""
         metrics = {m: self.catalog().metrics[m] for m in plan.metrics}
         fallback = guards.deterministic_summary(columns, rows, metrics, period, filters)
+        # Values already written the way they should be quoted ("382,800.41 USD", "249,175",
+        # "90.5 %"): the model copies them instead of converting raw decimals, which is where
+        # it erred (observed: 382800.41 written as $38,280.41, 249175 as 2.49 million).
+        units = {c: metrics[c]["unit"] for c in columns if c in metrics}
         table = "\n".join(
             [" | ".join(columns)]
-            + [" | ".join("" if v is None else str(v) for v in row) for row in rows[:20]]
+            + [
+                " | ".join(
+                    "" if v is None else guards.format_value(v, units[c]) if c in units else str(v)
+                    for c, v in zip(columns, row, strict=True)
+                )
+                for row in rows[:20]
+            ]
         )
         message = (
             f"QUESTION: {question}\n"
@@ -397,14 +514,29 @@ class Assistant:
         )
         try:
             # Rules in the system prompt (same every time), data in the message.
-            # 2 to 4 sentences fit in 160 tokens; longer output only costs time.
-            text = self.llm.chat(load_prompt("narrate"), message, max_tokens=160).strip()
-        except ModelUnavailable:
-            return fallback, "replaced"
+            # 2 or 3 sentences fit in 120 tokens; longer output only costs time.
+            text = self.llm.chat(load_prompt("narrate"), message, max_tokens=120).strip()
+        except ModelUnavailable as exc:
+            return fallback, "replaced", f"narrative not written by the model: {exc}"
         bad = guards.unsupported_numbers(text, rows[:20])
         if bad or not text:
-            return fallback, "replaced"
-        return text, "passed"
+            numbers = ", ".join(f"{n:g}" for n in bad) or "empty text"
+            return (
+                fallback,
+                "replaced",
+                f"narrative replaced, number(s) not in the result: {numbers}. "
+                f"Model text: {text[:400]}",
+            )
+        # True numbers can still support a false comparison ("X had the lowest ...").
+        wrong = guards.wrong_rankings(text, columns, rows, plan.metrics[0])
+        if wrong:
+            return (
+                fallback,
+                "replaced",
+                f"narrative replaced, ranking contradicted by the result: {'; '.join(wrong)}. "
+                f"Model text: {text[:400]}",
+            )
+        return text, "passed", None
 
     def provenance(self, resolved, rendered: str, row_count: int) -> Provenance:
         cat = self.catalog()

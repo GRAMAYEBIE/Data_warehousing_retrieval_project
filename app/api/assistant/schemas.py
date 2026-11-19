@@ -129,3 +129,6 @@ class Answer(BaseModel):
     duration_ms: int = 0
     step_ms: dict[str, int] = Field(default_factory=dict)  # guards, plan, validate, ...
     trace_id: str | None = None  # OpenTelemetry trace of this answer
+    # Per step: model calls, tokens read now (cached ones are not counted), tokens written,
+    # and the time of each, e.g. {"plan": {"prompt_tokens": 41, "output_tokens": 23, ...}}.
+    llm_usage: dict[str, dict[str, int]] = Field(default_factory=dict)

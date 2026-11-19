@@ -8,7 +8,7 @@ ORCH    := $(COMPOSE) --profile core --profile orchestration
 MONTH   ?= 2025-01
 
 .PHONY: help up down ps logs ingest ingest-force zones test-ingestion lint-ingestion psql \
-	airflow-up run-month run-month-force dbt-build test-ops
+	airflow-up run-month run-month-force dbt-build test-ops smoke eval
 
 help: ## List the available targets
 	@grep -E '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-18s %s\n", $$1, $$2}'
@@ -57,6 +57,14 @@ dbt-build: ## Build and test the dbt project outside Airflow
 test-ops: ## Unit tests of the pipeline operations logic (signals, gate, dbt results)
 	$(TOOLS) run --rm --no-deps -v "$(CURDIR)/airflow:/airflow" -e PYTHONPATH=/airflow/include \
 		--entrypoint pytest ingestion -q -p no:cacheprovider /airflow/tests
+
+smoke: ## End-to-end smoke test of the running platform (add WITH_MODEL=--with-model)
+	$(TOOLS) run --rm --no-deps -T -v "$(CURDIR):/repo" -w /repo --entrypoint python ingestion \
+		tests/smoke/smoke_test.py --token "$$API_TOKEN" $(WITH_MODEL)
+
+eval: ## Evaluation pack of the assistant (writes docs/evidence/q10/eval_results.md)
+	$(TOOLS) run --rm --no-deps -T -v "$(CURDIR):/repo" -w /repo --entrypoint python ingestion \
+		evals/run_evals.py --api http://api:8000 --token "$$API_TOKEN" --skip-model-down
 
 psql: ## Open psql on the warehouse as the admin user
 	$(CORE) exec postgres sh -c 'psql -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"'

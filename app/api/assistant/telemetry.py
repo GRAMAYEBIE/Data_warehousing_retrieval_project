@@ -16,6 +16,7 @@ import os
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
+from contextvars import ContextVar
 
 from opentelemetry import trace
 from opentelemetry.sdk.resources import Resource
@@ -24,6 +25,9 @@ from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
 tracer = trace.get_tracer("assistant")
 _configured = False
+# Model usage of the current answer, per step: {"plan": {"prompt_tokens": ..., ...}}.
+_usage: ContextVar[dict | None] = ContextVar("llm_usage", default=None)
+_step: ContextVar[str] = ContextVar("assistant_step", default="other")
 
 
 def setup(app=None) -> None:
@@ -58,11 +62,49 @@ def setup(app=None) -> None:
 def step(name: str, timings: dict[str, int], **attributes) -> Iterator[trace.Span]:
     """One step of the answer: a span, and its duration in milliseconds in `timings`."""
     start = time.monotonic()
+    token = _step.set(name)
     with tracer.start_as_current_span(f"assistant.{name}", attributes=attributes) as span:
         try:
             yield span
         finally:
             timings[name] = int((time.monotonic() - start) * 1000)
+            _step.reset(token)
+
+
+def start_usage() -> dict:
+    """Collect the model usage of the answer being computed (one dict per answer)."""
+    usage: dict = {}
+    _usage.set(usage)
+    return usage
+
+
+def current_usage() -> dict:
+    return {step: dict(totals) for step, totals in (_usage.get() or {}).items()}
+
+
+def record_llm_call(response: dict) -> dict:
+    """Usage of one Ollama call: on the current span, and added to the step's totals.
+
+    prompt_tokens is what the model had to read now; Ollama does not count the tokens it
+    took from its cache, so a small number on a long prompt means the cache was used.
+    """
+    call = {
+        "calls": 1,
+        "prompt_tokens": response.get("prompt_eval_count", 0),
+        "prompt_ms": int(response.get("prompt_eval_duration", 0) / 1e6),
+        "output_tokens": response.get("eval_count", 0),
+        "output_ms": int(response.get("eval_duration", 0) / 1e6),
+        "load_ms": int(response.get("load_duration", 0) / 1e6),
+    }
+    span = trace.get_current_span()
+    for key, value in call.items():
+        span.set_attribute(f"llm.{key}", value)
+    usage = _usage.get()
+    if usage is not None:
+        totals = usage.setdefault(_step.get(), dict.fromkeys(call, 0))
+        for key, value in call.items():
+            totals[key] += value
+    return call
 
 
 def current_trace_id() -> str | None:

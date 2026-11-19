@@ -33,7 +33,7 @@ class BuiltQuery:
 
 
 def _month_column(relation: str) -> str:
-    return "a.pickup_month" if relation == "routes" else "d.month_start"
+    return "a.pickup_month" if relation == "routes" else "a.month_start"
 
 
 def build(resolved: ResolvedPlan, catalog: Catalog, max_rows: int) -> BuiltQuery:
