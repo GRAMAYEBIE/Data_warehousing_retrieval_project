@@ -12,7 +12,7 @@ import pytest
 from assistant import guards, telemetry
 from assistant.catalog import Catalog
 from assistant.config import Settings
-from assistant.llm import ModelUnavailable, keep_alive_value
+from assistant.llm import MalformedOutput, ModelUnavailable, Ollama, keep_alive_value
 from assistant.resolver import UnsafeSQL, build, check
 from assistant.schemas import DateRange, Filter, Intent, Period, QueryPlan
 from assistant.service import Assistant
@@ -73,6 +73,7 @@ SETTINGS = Settings(
     llm_timeout_s=1,
     llm_threads=0,
     llm_keep_alive="-1",
+    llm_output_mode="schema",
     superset_url="",
     superset_user="",
     superset_password="",
@@ -296,6 +297,46 @@ def test_answer_carries_its_trace_and_step_durations():
     answer = a.ask("Top zones by trips")
     assert answer.trace_id and len(answer.trace_id) == 32
     assert {"guards", "plan", "validate", "execute", "narrate"} <= set(answer.step_ms)
+
+
+def scripted_ollama(replies, mode="free"):
+    llm = Ollama("http://x", "fake", 1, output_mode=mode)
+    calls = []
+
+    def chat(system, user, schema=None, max_tokens=None):
+        calls.append({"system": system, "user": user, "schema": schema})
+        return replies[len(calls) - 1]
+
+    llm.chat = chat
+    return llm, calls
+
+
+def test_plan_wrapped_in_text_is_extracted_and_validated():
+    llm, calls = scripted_ollama(
+        ['Here is the plan:\n```json\n{"intent": "lookup", "metrics": ["trips"]}\n```']
+    )
+    assert llm.structured("sys", "q", QueryPlan).metrics == ["trips"]
+    assert calls[0]["schema"] is None and "JSON schema" in calls[0]["system"]
+
+
+def test_invalid_plan_gets_one_repair_with_the_error_shown():
+    llm, calls = scripted_ollama(
+        [
+            '{"intent": "rank", "metrics": ["trips"], "limit": 0}',
+            '{"intent": "rank", "metrics": ["trips"], "limit": 5}',
+        ],
+        "json",
+    )
+    assert llm.structured("sys", "q", QueryPlan).limit == 5
+    assert len(calls) == 2 and "not a valid plan" in calls[1]["user"]
+    assert "limit:" in calls[1]["user"]  # the model is told which field is wrong
+    assert calls[0]["schema"] == "json"
+
+
+def test_two_invalid_plans_are_malformed_output():
+    llm, _ = scripted_ollama(["no json here", '{"limit": 999}'])
+    with pytest.raises(MalformedOutput):
+        llm.structured("sys", "q", QueryPlan)
 
 
 def test_keep_alive_is_sent_in_a_form_ollama_accepts():

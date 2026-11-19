@@ -35,6 +35,17 @@ def test_env_gets_random_secrets_and_keeps_the_rest(tmp_path, monkeypatch):
     assert "docker-compose.gpu.yml" in values["COMPOSE_FILE"]
 
 
+def test_public_env_example_holds_no_real_secret():
+    """.env.example is public: every secret must stay the placeholder, so the bootstrap
+    replaces it with a random value (an edited value would ship the same password to
+    every machine, and a non-Fernet key would stop Airflow)."""
+    secret = ("PASSWORD", "SECRET", "_KEY", "TOKEN")
+    for line in bootstrap.ENV_EXAMPLE.read_text(encoding="utf-8").splitlines():
+        key, sep, value = line.partition("=")
+        if sep and not line.startswith("#") and any(s in key for s in secret):
+            assert value == "change_me", f"{key} must be change_me in .env.example"
+
+
 def test_existing_env_is_never_overwritten(tmp_path, monkeypatch):
     env = tmp_path / ".env"
     env.write_text("POSTGRES_PASSWORD=mine\n", encoding="utf-8")

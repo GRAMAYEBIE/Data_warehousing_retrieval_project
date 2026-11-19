@@ -60,6 +60,7 @@ class Assistant:
             settings.llm_timeout_s,
             settings.llm_threads,
             settings.llm_keep_alive,
+            settings.llm_output_mode,
         )
         self.store = store or Store(settings)
         self.sessions: dict[str, Session] = {}
@@ -127,6 +128,17 @@ class Assistant:
         return self.llm.structured(
             system, planning_message(self.context(Session("r")), question), ReportRequest
         )
+
+    def warm_up(self) -> dict[str, int]:
+        """Read the planner and narrator system prompts into Ollama's cache, so the first
+        real question pays only its own tokens (measured: 75 s cold, 3 to 8 s cached)."""
+        timings: dict[str, int] = {}
+        system = planning_prompt(self.settings.prompt_variant, self.catalog().summary())
+        with telemetry.step("warm_up_planner", timings):
+            self.llm.warm_up(self.llm.planner_system(system, QueryPlan))
+        with telemetry.step("warm_up_narrator", timings):
+            self.llm.warm_up(load_prompt("narrate"))
+        return timings
 
     @staticmethod
     def merge_follow_up(plan: QueryPlan, session: Session) -> QueryPlan:
@@ -385,7 +397,8 @@ class Assistant:
         )
         try:
             # Rules in the system prompt (same every time), data in the message.
-            text = self.llm.chat(load_prompt("narrate"), message, max_tokens=220).strip()
+            # 2 to 4 sentences fit in 160 tokens; longer output only costs time.
+            text = self.llm.chat(load_prompt("narrate"), message, max_tokens=160).strip()
         except ModelUnavailable:
             return fallback, "replaced"
         bad = guards.unsupported_numbers(text, rows[:20])

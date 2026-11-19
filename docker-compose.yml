@@ -385,6 +385,7 @@ services:
       OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:3b}
       PROMPT_VARIANT: ${PROMPT_VARIANT:-v3_structured_examples}
       OLLAMA_NUM_THREAD: ${OLLAMA_NUM_THREAD:-0}
+      LLM_OUTPUT_MODE: ${LLM_OUTPUT_MODE:-free}
       LLM_TIMEOUT_S: ${LLM_TIMEOUT_S:-900}
       API_TOKEN: ${API_TOKEN}
       SUPERSET_URL: http://superset:8088

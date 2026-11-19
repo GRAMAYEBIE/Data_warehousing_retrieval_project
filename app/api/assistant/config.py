@@ -20,6 +20,7 @@ class Settings:
     llm_timeout_s: float
     llm_threads: int  # 0: Ollama decides
     llm_keep_alive: str  # "-1": keep the model loaded
+    llm_output_mode: str  # schema | json | free (see Ollama.structured)
     superset_url: str
     superset_user: str
     superset_password: str
@@ -39,6 +40,7 @@ class Settings:
             llm_timeout_s=float(os.environ.get("LLM_TIMEOUT_S", "600")),
             llm_threads=int(os.environ.get("OLLAMA_NUM_THREAD", "0")),
             llm_keep_alive=os.environ.get("OLLAMA_KEEP_ALIVE", "-1"),
+            llm_output_mode=os.environ.get("LLM_OUTPUT_MODE", "free"),
             superset_url=os.environ.get("SUPERSET_URL", "http://superset:8088").rstrip("/"),
             superset_user=os.environ.get("SUPERSET_AI_USER", "ai_builder"),
             superset_password=os.environ.get("SUPERSET_AI_PASSWORD", ""),

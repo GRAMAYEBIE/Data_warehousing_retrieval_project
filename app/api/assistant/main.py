@@ -5,6 +5,9 @@ Every endpoint except /health requires `Authorization: Bearer <API_TOKEN>`.
 
 from __future__ import annotations
 
+import os
+import threading
+from contextlib import asynccontextmanager
 from functools import lru_cache
 
 from fastapi import Depends, FastAPI, Header, HTTPException
@@ -14,11 +17,32 @@ from assistant import telemetry
 from assistant.config import Settings
 from assistant.service import Assistant
 
+WARM_UP = {"state": "not started", "step_ms": {}}
+
+
+def warm_up() -> None:
+    """Background: the API answers /health at once while the prompts are being cached."""
+    WARM_UP["state"] = "running"
+    try:
+        WARM_UP["step_ms"] = get_assistant().warm_up()
+        WARM_UP["state"] = "done"
+    except Exception as exc:  # noqa: BLE001 - a failed warm-up only means a slower first answer
+        WARM_UP["state"] = f"failed: {type(exc).__name__}"
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    if os.environ.get("ASSISTANT_WARM_UP", "true").lower() == "true":
+        threading.Thread(target=warm_up, name="prompt-cache-warm-up", daemon=True).start()
+    yield
+
+
 app = FastAPI(
     title="NYC Taxi Insight Hub assistant",
     version="1.0.0",
     description="Governed natural-language analytics: the language model plans and explains; "
     "approved query templates compute from the published layer.",
+    lifespan=lifespan,
 )
 telemetry.setup(app)
 
@@ -55,6 +79,8 @@ def health() -> dict:
         "database": database,
         "model": assistant.settings.model,
         "model_available": assistant.llm.available(),
+        "output_mode": assistant.llm.output_mode,
+        "prompt_cache_warm_up": WARM_UP,
         "complete_months": months,
     }
 
