@@ -8,7 +8,9 @@
 # Adjust swapFile to a drive with free space (it grows up to the swap size).
 [wsl2]
 memory=4GB
-processors=4
+# Keep one core for Windows: with all cores, the Docker VM stalled under load
+# ("soft lockup" in its kernel log) and PostgreSQL lost backends.
+processors=3
 swap=12GB
 swapFile=E:\\wsl\\swap.vhdx
 

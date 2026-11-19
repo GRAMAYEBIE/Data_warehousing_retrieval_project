@@ -2,7 +2,8 @@
 
 check source -> land in RustFS -> load bronze -> anything new? -> dbt build (Cosmos,
 one task per model, tests after each model) -> operational signals -> quality gate +
-atomic publication to analytics -> record outcome and notify.
+atomic publication to analytics -> refresh Superset (datasets, cache, dashboards) ->
+record outcome and notify.
 
 Safety:
   * max_active_runs=1: two monthly runs never overlap.
@@ -30,7 +31,7 @@ from airflow.sdk import DAG, Param, get_current_context
 from cosmos import DbtTaskGroup, ExecutionConfig, ProfileConfig, ProjectConfig, RenderConfig
 from cosmos.constants import LoadMode, SourceRenderingBehavior, TestBehavior
 
-from nyc_taxi_ops import dbt_results, outcome, publish, signals
+from nyc_taxi_ops import bi_refresh, dbt_results, outcome, publish, signals
 
 DAG_ID = "monthly_yellow_pipeline"
 DBT_PROJECT_DIR = Path(os.environ.get("DBT_PROJECT_DIR", "/opt/airflow/dbt"))
@@ -134,15 +135,34 @@ def gate_and_publish(dag_run, **_) -> dict:
         conn.close()
 
 
-def finish(dag_run, **_) -> dict:
+def refresh_dashboards(**_) -> str:
+    """After a publication: Superset datasets, cache and dashboards follow the new data."""
+    connection = PostgresHook.get_connection(WAREHOUSE_CONN)
+    env = bi_refresh.command_env(
+        connection.host,
+        connection.port or 5432,
+        connection.schema,
+        connection.login,
+        connection.password,
+    )
+    return bi_refresh.refresh(env, DBT_PROJECT_DIR / "target" / "semantic_manifest.json")
+
+
+def finish(dag_run, ti, **_) -> dict:
     conn = _connection()
     try:
         summary = outcome.finish_run(conn, dag_run.run_id)
     finally:
         conn.close()
+    summary["dashboards"] = bi_refresh.dashboards_status(
+        summary["published"], ti.xcom_pull(task_ids="refresh_dashboards")
+    )
     outcome.notify(summary)
     if summary["status"] == "failed":
         raise RuntimeError(f"pipeline run failed: {summary.get('message') or 'see task logs'}")
+    if summary["dashboards"] == "refresh failed":
+        # The data is published (analytics is correct); only Superset is behind.
+        raise RuntimeError("data published but the dashboards were not refreshed: see task logs")
     return summary
 
 
@@ -255,6 +275,13 @@ with DAG(
         task_id="quality_gate_and_publish", python_callable=gate_and_publish, retries=1
     )
 
+    refresh_bi = PythonOperator(
+        task_id="refresh_dashboards",
+        python_callable=refresh_dashboards,
+        retries=1,
+        execution_timeout=timedelta(minutes=45),
+    )
+
     report = PythonOperator(
         task_id="record_outcome_and_notify",
         python_callable=finish,
@@ -265,4 +292,4 @@ with DAG(
     # When "anything_to_publish" short-circuits, the build steps are skipped and
     # record_outcome_and_notify (trigger rule all_done) still reports "nothing_new".
     resolve >> check_source >> land >> load_bronze >> decide >> dbt_build
-    dbt_build >> measure >> publish_task >> report
+    dbt_build >> measure >> publish_task >> refresh_bi >> report

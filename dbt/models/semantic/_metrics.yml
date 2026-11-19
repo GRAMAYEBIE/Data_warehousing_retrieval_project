@@ -23,7 +23,7 @@ metrics:
     filter: "{{ Dimension('trip__quality_status') }} = 'valid'"
     config:
       meta: &meta_default
-        owner: AYEBIE GRAM MESCHAC (Data Team)
+        owner: AYEBIE GRAM MESCHAC
         grains: [day, week, month]
         base_table: analytics.agg_trips_daily
         sql_expression: "sum(trip_count) filter (where quality_status = 'valid')"

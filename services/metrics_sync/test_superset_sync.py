@@ -23,7 +23,7 @@ def metric(name, expression, unit="USD", estimate=False):
                 "sql_expression": expression,
                 "unit": unit,
                 "is_estimate": estimate,
-                "owner": "AYEBIE GRAM MESCHAC (Data Team)",
+                "owner": "AYEBIE GRAM MESCHAC",
             }
         },
     }

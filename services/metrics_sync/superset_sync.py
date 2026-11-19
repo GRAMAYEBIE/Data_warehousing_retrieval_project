@@ -25,35 +25,21 @@ from pathlib import Path
 
 import httpx
 
-OWNER = "AYEBIE GRAM MESCHAC (Data Team)"
+OWNER = "AYEBIE GRAM MESCHAC"
 DATABASE_NAME = "NYC Taxi warehouse (published layer, read-only)"
 METRIC_SOURCE = "Governed metric, defined in dbt/models/semantic/_metrics.yml"
-COMPLETE_MONTHS = "d.month_start IN (SELECT source_month FROM analytics.recon_bronze_silver)"
-
-DIM_JOINS = """
-JOIN analytics.dim_date AS d ON a.pickup_date_sk = d.date_sk
-JOIN analytics.dim_zone AS z ON a.pickup_zone_sk = z.zone_sk"""
-DIM_COLUMNS = """
-    d.date_day, d.week_start, d.month_start, d.day_of_week, d.day_name, d.day_type,
-    d.is_weekend, d.is_holiday, d.holiday_name,
-    z.zone_name AS pickup_zone, z.borough AS pickup_borough,
-    z.market_segment AS pickup_market_segment, z.is_airport AS is_pickup_airport"""
-
+# The four BI datasets read the materialized views built by the publication step
+# (airflow/include/nyc_taxi_ops/publish.py, BI_VIEWS): dimensions already joined, complete
+# months only, indexed. A chart is a scan of one indexed view; the first version, with the
+# joins inside each dataset, timed out at 120 s on the development machine.
 DATASETS = [
     {
         "name": "trips_daily",
         "description": (
             "Trips by pickup day, pickup zone, payment type, rate code, vendor and quality "
-            "status (complete months only). Source: analytics.agg_trips_daily."
+            "status (complete months only). Source: analytics.mv_trips_daily."
         ),
-        "sql": f"""
-SELECT a.*, {DIM_COLUMNS},
-    p.payment_type_name, r.rate_code_name, v.vendor_name
-FROM analytics.agg_trips_daily AS a {DIM_JOINS}
-JOIN analytics.dim_payment_type AS p ON a.payment_type_sk = p.payment_type_sk
-JOIN analytics.dim_rate_code AS r ON a.rate_code_sk = r.rate_code_sk
-JOIN analytics.dim_vendor AS v ON a.vendor_sk = v.vendor_sk
-WHERE {COMPLETE_MONTHS}""",
+        "sql": "SELECT * FROM analytics.mv_trips_daily",
         "main_dttm_col": "date_day",
         "rls": True,
     },
@@ -61,14 +47,9 @@ WHERE {COMPLETE_MONTHS}""",
         "name": "trips_hourly",
         "description": (
             "Trips by pickup day and hour, pickup zone, service period, airport flag and "
-            "quality status (complete months only). Source: analytics.agg_trips_hourly."
+            "quality status (complete months only). Source: analytics.mv_trips_hourly."
         ),
-        "sql": f"""
-SELECT a.*, {DIM_COLUMNS},
-    sp.service_period_name, sp.is_peak
-FROM analytics.agg_trips_hourly AS a {DIM_JOINS}
-JOIN analytics.dim_service_period AS sp ON a.service_period_sk = sp.service_period_sk
-WHERE {COMPLETE_MONTHS}""",
+        "sql": "SELECT * FROM analytics.mv_trips_hourly",
         "main_dttm_col": "date_day",
         "rls": True,
     },
@@ -76,21 +57,9 @@ WHERE {COMPLETE_MONTHS}""",
         "name": "routes_monthly",
         "description": (
             "Valid trips by month and route (pickup zone to dropoff zone) and service period "
-            "(complete months only). Source: analytics.agg_routes_monthly."
+            "(complete months only). Source: analytics.mv_routes_monthly."
         ),
-        "sql": """
-SELECT a.*, 'valid'::text AS quality_status,
-    pz.zone_name AS pickup_zone, pz.borough AS pickup_borough,
-    pz.market_segment AS pickup_market_segment, pz.is_airport AS is_pickup_airport,
-    dz.zone_name AS dropoff_zone, dz.borough AS dropoff_borough,
-    dz.market_segment AS dropoff_market_segment, dz.is_airport AS is_dropoff_airport,
-    pz.zone_name || ' -> ' || dz.zone_name AS route,
-    sp.service_period_name
-FROM analytics.agg_routes_monthly AS a
-JOIN analytics.dim_zone AS pz ON a.pickup_zone_sk = pz.zone_sk
-JOIN analytics.dim_zone AS dz ON a.dropoff_zone_sk = dz.zone_sk
-JOIN analytics.dim_service_period AS sp ON a.service_period_sk = sp.service_period_sk
-WHERE a.pickup_month IN (SELECT source_month FROM analytics.recon_bronze_silver)""",
+        "sql": "SELECT * FROM analytics.mv_routes_monthly",
         "main_dttm_col": "pickup_month",
         "rls": True,
     },
@@ -98,17 +67,88 @@ WHERE a.pickup_month IN (SELECT source_month FROM analytics.recon_bronze_silver)
         "name": "quality_daily",
         "description": (
             "Data quality by source month, pickup day, vendor, pickup zone and payment type: "
-            "trips per status and per flag. Source: analytics.agg_quality_daily."
+            "trips per status and per flag. Source: analytics.mv_quality_daily."
         ),
-        "sql": f"""
-SELECT a.*, {DIM_COLUMNS},
-    p.payment_type_name, v.vendor_name
-FROM analytics.agg_quality_daily AS a {DIM_JOINS}
-JOIN analytics.dim_payment_type AS p ON a.payment_type_sk = p.payment_type_sk
-JOIN analytics.dim_vendor AS v ON a.vendor_sk = v.vendor_sk
-WHERE a.source_month IN (SELECT source_month FROM analytics.recon_bronze_silver)""",
+        "sql": "SELECT * FROM analytics.mv_quality_daily",
         "main_dttm_col": "date_day",
         "rls": True,
+    },
+    # Analyses computed at publication from the governed aggregates (valid trips only).
+    # Their indicators are derived from governed metrics and labelled as such.
+    {
+        "name": "revenue_bridge",
+        "description": (
+            "Price-volume decomposition of the revenue change between consecutive complete "
+            "months: previous revenue + volume effect + price effect = revenue. Derived from "
+            "the governed metrics total_revenue and trips. Source: analytics.mv_revenue_bridge."
+        ),
+        "sql": "SELECT * FROM analytics.mv_revenue_bridge",
+        "main_dttm_col": "month_start",
+        "rls": False,
+        "metrics": [
+            (
+                "revenue_bridge_amount",
+                "sum(amount)",
+                "Amount (USD)",
+                "$,.3s",
+                "Revenue of the previous month, then the volume and price effects.",
+            ),
+        ],
+    },
+    {
+        "name": "dropoff_growth",
+        "description": (
+            "Drop-off zones: valid trips in the latest complete month versus the month before "
+            "(zones with at least 500 trips). Derived from the governed metric trips. "
+            "Source: analytics.mv_dropoff_growth."
+        ),
+        "sql": "SELECT * FROM analytics.mv_dropoff_growth",
+        "main_dttm_col": None,
+        "rls": False,
+        "metrics": [
+            (
+                "zone_trip_change",
+                "max(trip_change_pct) / 100.0",
+                "Trip change (%)",
+                ".1%",
+                "Change in valid trips ending in the zone, latest month versus the month before.",
+            ),
+            (
+                "trips_latest_month",
+                "sum(trips_latest_month)",
+                "Trips (latest month)",
+                ",d",
+                "Valid trips ending in the zone in the latest complete month.",
+            ),
+        ],
+    },
+    {
+        "name": "route_duration_anomaly",
+        "description": (
+            "Routes slower than usual: average duration of the latest month versus the "
+            "earlier months, by route and service period, scored with a robust z-score "
+            "across all routes. Derived from the governed metric avg_duration. "
+            "Source: analytics.mv_route_duration_anomaly."
+        ),
+        "sql": "SELECT * FROM analytics.mv_route_duration_anomaly",
+        "main_dttm_col": None,
+        "rls": True,
+        "metrics": [
+            (
+                "route_anomaly_score",
+                "max(robust_z)",
+                "Robust z-score",
+                ".2f",
+                "(gap - median gap) / (1.4826 x MAD). Above 3: unusual slowdown.",
+            ),
+            (
+                "route_duration_gap",
+                "max(duration_gap_pct) / 100.0",
+                "Duration gap (%)",
+                ".1%",
+                "Latest average duration versus the baseline of earlier months.",
+            ),
+        ],
     },
     {
         "name": "pipeline_health",
@@ -315,6 +355,24 @@ def ensure_dataset(api: Superset, database_id: int, spec: dict, catalog: list[di
     metrics = metric_payloads(catalog, column_names)
     if spec["name"] == "quality_daily":
         metrics += quality_rate_payloads(column_names)
+    for name, expression, label, d3format, description in spec.get("metrics", []):
+        metrics.append(
+            {
+                "metric_name": name,
+                "verbose_name": label,
+                "expression": expression,
+                "description": description + " Derived indicator (not a governed metric).",
+                "d3format": d3format,
+                "extra": json.dumps(
+                    {
+                        "certification": {
+                            "certified_by": OWNER,
+                            "details": "Derived from governed metrics at publication",
+                        }
+                    }
+                ),
+            }
+        )
     # Keep ids of metrics that already exist so the update replaces them in place.
     known = {m["metric_name"]: m["id"] for m in current.get("metrics", [])}
     for metric in metrics:
@@ -404,7 +462,9 @@ def ensure_ai_builder(api: Superset, password: str) -> str:
     }
     existing = api.find("security/users", "username", "ai_builder")
     if existing:
-        api.call("PUT", f"/api/v1/security/users/{existing['id']}", json=body | {"password": password})
+        api.call(
+            "PUT", f"/api/v1/security/users/{existing['id']}", json=body | {"password": password}
+        )
         return f"ai_builder updated (id {existing['id']}, role Alpha)"
     created = api.call("POST", "/api/v1/security/users/", json=body | {"password": password})
     return f"ai_builder created (id {created.get('id')}, role Alpha)"

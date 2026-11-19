@@ -64,10 +64,16 @@ x-airflow-common: &airflow-common
     INGEST_BATCH_ROWS: ${INGEST_BATCH_ROWS:-200000}
     NOTIFY_WEBHOOK_URL: ${NOTIFY_WEBHOOK_URL:-}
     PIPELINE_SCHEDULE: ${PIPELINE_SCHEDULE:-}
+    # Superset refresh after each publication (task refresh_dashboards).
+    SUPERSET_URL: http://superset:8088
+    SUPERSET_ADMIN_PASSWORD: ${SUPERSET_ADMIN_PASSWORD}
+    SUPERSET_READER_PASSWORD: ${SUPERSET_READER_PASSWORD}
+    SUPERSET_AI_PASSWORD: ${SUPERSET_AI_PASSWORD:-}
   volumes:
     - ./airflow/dags:/opt/airflow/dags
     - ./airflow/include:/opt/airflow/include
     - ./dbt:/opt/airflow/dbt
+    - ./services/metrics_sync:/opt/airflow/metrics_sync:ro
     - airflow_logs:/opt/airflow/logs
   depends_on: &airflow-depends
     postgres:
@@ -103,6 +109,12 @@ services:
       - maintenance_work_mem=256MB
       - -c
       - max_wal_size=4GB
+      # Small host: one CPU per query and no JIT. Parallel workers saturated every core,
+      # the Docker VM stalled ("soft lockup" in its kernel log) and backends were lost.
+      - -c
+      - max_parallel_workers_per_gather=0
+      - -c
+      - jit=off
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
@@ -258,7 +270,7 @@ services:
   redis:
     image: redis:7.2-bookworm
     profiles: [bi]
-    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "128mb",
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "256mb",
               "--maxmemory-policy", "allkeys-lru"]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]

@@ -14,21 +14,21 @@ valid trips only unless stated otherwise.
 
 | Metric | Definition | Unit | Filters | Grains | Owner |
 |---|---|---|---|---|---|
-| `trips` * | Trips: Number of completed valid trips. | trips | valid trips only | day, week, month | AYEBIE GRAM MESCHAC (Data Team) |
-| `total_revenue` * | Total revenue: Sum of total_amount of valid trips (USD). Includes the metered fare, extras, MTA tax, tolls, improvement surcharge, NYS congestion surcharge, airport fee, CBD congestion fee and recorded tips. Cash tips are not recorded by the meter. | USD | valid trips only | day, week, month | AYEBIE GRAM MESCHAC (Data Team) |
-| `avg_fare` * | Average fare: Average metered fare of valid trips (USD), tolls, surcharges and tips excluded. | USD per trip | valid trips only | day, week, month | AYEBIE GRAM MESCHAC (Data Team) |
-| `avg_tip` * | Average tip (card trips): Average tip of valid card trips (USD). Card trips only: cash tips are not recorded, so an average over all trips would understate tipping. | USD per card trip | valid trips paid by card only | day, week, month | AYEBIE GRAM MESCHAC (Data Team) |
-| `tip_rate` * | Tip rate (card trips): Tips divided by metered fare, valid card trips only. | ratio | valid trips paid by card only | day, week, month | AYEBIE GRAM MESCHAC (Data Team) |
-| `avg_distance` * | Average distance: Average trip distance of valid trips (miles), as reported by the taximeter. | miles per trip | valid trips only | day, week, month | AYEBIE GRAM MESCHAC (Data Team) |
-| `avg_duration` * | Average duration: Average time between pickup and dropoff of valid trips (minutes). | minutes per trip | valid trips only | day, week, month | AYEBIE GRAM MESCHAC (Data Team) |
-| `revenue_per_mile` * | Revenue per mile: Total revenue divided by distance, valid trips with a positive distance (USD per mile). | USD per mile | valid trips with a positive distance | day, week, month | AYEBIE GRAM MESCHAC (Data Team) |
-| `trips_per_active_hour` * | Trips per active hour: Valid trips divided by the number of distinct pickup hours (date and hour) with at least one valid trip in the selection. A demand-intensity proxy, not a supply measure. | trips per active hour | valid trips only | hour, day, week, month | AYEBIE GRAM MESCHAC (Data Team) |
-| `airport_trips` * | Airport trips: Valid trips with a pickup or dropoff at Newark (zone 1), JFK (132) or LaGuardia (138), or a JFK / Newark rate code. | trips | valid trips only | day, week, month | AYEBIE GRAM MESCHAC (Data Team) |
-| `congestion_fee_revenue` * | Congestion fee revenue (CBD): Sum of the MTA Central Business District congestion fee of valid trips (USD), collected from 2025-01-05. Distinct from the NYS congestion surcharge. | USD | valid trips only | day, week, month | AYEBIE GRAM MESCHAC (Data Team) |
-| `valid_trip_rate` * | Valid-trip rate: Share of trips with quality status valid among all trips of the selection. The data-quality indicator shown on every dashboard and in every AI answer. | ratio | all trips (valid, suspicious and invalid) | day, week, month | AYEBIE GRAM MESCHAC (Data Team) |
-| `airport_fee_revenue` | Airport fee revenue: Sum of the airport fee of valid trips (USD). | USD | valid trips only | day, week, month | AYEBIE GRAM MESCHAC (Data Team) |
-| `congestion_surcharge_revenue` | Congestion surcharge revenue (NYS): Sum of the New York State congestion surcharge of valid trips (USD). | USD | valid trips only | day, week, month | AYEBIE GRAM MESCHAC (Data Team) |
-| `est_co2_kg` | Estimated CO2 (kg) - estimate: ESTIMATE, not a measurement. Valid trip distance multiplied by 0.400 kg of CO2 per mile, the US EPA figure for a typical passenger vehicle. Limits: the Yellow fleet includes hybrids (lower emissions), distance driven without a passenger is not in the data (higher emissions), and traffic conditions are ignored. **Estimate.** | kg CO2 (estimate) | valid trips only | day, week, month | AYEBIE GRAM MESCHAC (Data Team) |
+| `trips` * | Trips: Number of completed valid trips. | trips | valid trips only | day, week, month | AYEBIE GRAM MESCHAC |
+| `total_revenue` * | Total revenue: Sum of total_amount of valid trips (USD). Includes the metered fare, extras, MTA tax, tolls, improvement surcharge, NYS congestion surcharge, airport fee, CBD congestion fee and recorded tips. Cash tips are not recorded by the meter. | USD | valid trips only | day, week, month | AYEBIE GRAM MESCHAC |
+| `avg_fare` * | Average fare: Average metered fare of valid trips (USD), tolls, surcharges and tips excluded. | USD per trip | valid trips only | day, week, month | AYEBIE GRAM MESCHAC |
+| `avg_tip` * | Average tip (card trips): Average tip of valid card trips (USD). Card trips only: cash tips are not recorded, so an average over all trips would understate tipping. | USD per card trip | valid trips paid by card only | day, week, month | AYEBIE GRAM MESCHAC |
+| `tip_rate` * | Tip rate (card trips): Tips divided by metered fare, valid card trips only. | ratio | valid trips paid by card only | day, week, month | AYEBIE GRAM MESCHAC |
+| `avg_distance` * | Average distance: Average trip distance of valid trips (miles), as reported by the taximeter. | miles per trip | valid trips only | day, week, month | AYEBIE GRAM MESCHAC |
+| `avg_duration` * | Average duration: Average time between pickup and dropoff of valid trips (minutes). | minutes per trip | valid trips only | day, week, month | AYEBIE GRAM MESCHAC |
+| `revenue_per_mile` * | Revenue per mile: Total revenue divided by distance, valid trips with a positive distance (USD per mile). | USD per mile | valid trips with a positive distance | day, week, month | AYEBIE GRAM MESCHAC |
+| `trips_per_active_hour` * | Trips per active hour: Valid trips divided by the number of distinct pickup hours (date and hour) with at least one valid trip in the selection. A demand-intensity proxy, not a supply measure. | trips per active hour | valid trips only | hour, day, week, month | AYEBIE GRAM MESCHAC |
+| `airport_trips` * | Airport trips: Valid trips with a pickup or dropoff at Newark (zone 1), JFK (132) or LaGuardia (138), or a JFK / Newark rate code. | trips | valid trips only | day, week, month | AYEBIE GRAM MESCHAC |
+| `congestion_fee_revenue` * | Congestion fee revenue (CBD): Sum of the MTA Central Business District congestion fee of valid trips (USD), collected from 2025-01-05. Distinct from the NYS congestion surcharge. | USD | valid trips only | day, week, month | AYEBIE GRAM MESCHAC |
+| `valid_trip_rate` * | Valid-trip rate: Share of trips with quality status valid among all trips of the selection. The data-quality indicator shown on every dashboard and in every AI answer. | ratio | all trips (valid, suspicious and invalid) | day, week, month | AYEBIE GRAM MESCHAC |
+| `airport_fee_revenue` | Airport fee revenue: Sum of the airport fee of valid trips (USD). | USD | valid trips only | day, week, month | AYEBIE GRAM MESCHAC |
+| `congestion_surcharge_revenue` | Congestion surcharge revenue (NYS): Sum of the New York State congestion surcharge of valid trips (USD). | USD | valid trips only | day, week, month | AYEBIE GRAM MESCHAC |
+| `est_co2_kg` | Estimated CO2 (kg) - estimate: ESTIMATE, not a measurement. Valid trip distance multiplied by 0.400 kg of CO2 per mile, the US EPA figure for a typical passenger vehicle. Limits: the Yellow fleet includes hybrids (lower emissions), distance driven without a passenger is not in the data (higher emissions), and traffic conditions are ignored. **Estimate.** | kg CO2 (estimate) | valid trips only | day, week, month | AYEBIE GRAM MESCHAC |
 
 ## Formulas
 
@@ -119,7 +119,7 @@ sum(sum_total_amount_with_distance) filter (where quality_status = 'valid') / nu
 - Published expression on `analytics.agg_trips_hourly`:
 
 ```sql
-sum(trip_count) filter (where quality_status = 'valid') / nullif(count(distinct (pickup_date_sk, pickup_hour)) filter (where quality_status = 'valid'), 0)
+sum(trip_count) filter (where quality_status = 'valid') / nullif(count(distinct pickup_date_sk * 100 + pickup_hour) filter (where quality_status = 'valid'), 0)
 ```
 
 ### `airport_trips` (simple)
@@ -191,7 +191,7 @@ sum(sum_trip_distance) filter (where quality_status = 'valid') * 0.400
 - Published expression on `analytics.agg_trips_hourly`:
 
 ```sql
-count(distinct (pickup_date_sk, pickup_hour)) filter (where quality_status = 'valid')
+count(distinct pickup_date_sk * 100 + pickup_hour) filter (where quality_status = 'valid')
 ```
 
 ### `card_trips` (simple, base)

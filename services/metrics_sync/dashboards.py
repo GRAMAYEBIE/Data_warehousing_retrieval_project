@@ -40,6 +40,7 @@ class Chart:
     pie        donut                           table      aggregated table
     raw        raw rows                        heatmap    x by y matrix
     bubble     entity bubbles: x, y, size      treemap    nested rectangles (groupby levels)
+    waterfall  ordered steps (x) of one metric, ending with the total
     """
 
     title: str
@@ -192,7 +193,9 @@ def _form_data(chart: Chart, dataset_id: int) -> dict:
             "show_legend": True,
             "legendOrientation": "top",
             "opacity": 0.75,
-            "orderby": [[chart.metrics[2], False]],
+            # Sort and limit by bubble size the way the bubble chart expects it (a raw
+            # "orderby" list made the chart fail with "unhashable type: 'list'").
+            "order_desc": True,
         }
     if k == "treemap":
         return base | {
@@ -203,6 +206,21 @@ def _form_data(chart: Chart, dataset_id: int) -> dict:
             "show_upper_labels": True,
             "label_type": "key_value",
             "number_format": chart.y_format or "SMART_NUMBER",
+        }
+    if k == "waterfall":
+        # Steps are ordered labels ("1. ...", "2. ...", "3. ..."); Superset adds the total.
+        return base | {
+            "viz_type": "waterfall",
+            "x_axis": chart.x,
+            "metric": chart.metrics[0],
+            "groupby": [],
+            "show_value": True,
+            "show_legend": False,
+            "increase_color": {"r": 46, "g": 139, "b": 87, "a": 1},
+            "decrease_color": {"r": 192, "g": 57, "b": 43, "a": 1},
+            "total_color": {"r": 31, "g": 78, "b": 121, "a": 1},
+            "x_ticks_layout": "auto",
+            "y_axis_format": chart.y_format or "SMART_NUMBER",
         }
     if k == "kpi":
         return base | {
@@ -301,7 +319,8 @@ def query_context(chart: Chart, dataset_id: int) -> dict:
     """Server-side query equivalent to the chart, used to verify it and to save it."""
     columns: list = []
     if (
-        chart.kind in ("trend_kpi", "line", "area", "bar", "hbar", "stacked", "heatmap", "mixed")
+        chart.kind
+        in ("trend_kpi", "line", "area", "bar", "hbar", "stacked", "heatmap", "mixed", "waterfall")
         and chart.x
     ):
         if chart.grain:
@@ -319,7 +338,8 @@ def query_context(chart: Chart, dataset_id: int) -> dict:
     columns += chart.groupby
     if chart.kind == "raw":
         columns = chart.columns
-    metrics = [] if chart.kind == "raw" else chart.metrics + chart.metrics_b
+    # Raw rows: no metrics at all (None), otherwise Superset groups by the listed columns.
+    metrics = None if chart.kind == "raw" else chart.metrics + chart.metrics_b
     query = {
         "columns": columns,
         "metrics": metrics,
@@ -331,6 +351,10 @@ def query_context(chart: Chart, dataset_id: int) -> dict:
             if chart.kind in ("table", "bar", "hbar", "bubble")
             and not chart.grain
             and chart.metrics
+            else [[chart.x, True]]
+            if chart.kind == "waterfall"
+            else [[chart.sort_by, chart.ascending]]
+            if chart.kind == "raw" and chart.sort_by
             else []
         ),
     }
@@ -510,6 +534,23 @@ DASHBOARDS = [
                     height=55,
                 ),
             ],
+            "Why revenue changed in the latest month",
+            [
+                Chart(
+                    "Revenue bridge: more trips or higher revenue per trip?",
+                    "revenue_bridge",
+                    "waterfall",
+                    "Is revenue changing because there are more trips or because each trip "
+                    "brings more? Previous month, then the volume effect and the price effect; "
+                    "the last bar is the latest month.",
+                    ["revenue_bridge_amount"],
+                    "step",
+                    filters=[{"col": "is_latest_month", "op": "==", "val": True}],
+                    y_format="$,.4s",
+                    width=12,
+                    height=55,
+                ),
+            ],
         ],
         insight_sql={
             "months": "select count(*) from analytics.recon_bronze_silver",
@@ -540,15 +581,25 @@ DASHBOARDS = [
                 select round(100.0*sum(trip_count) filter (where quality_status='valid')/sum(trip_count),1)
                 from analytics.agg_trips_daily a join analytics.dim_date d on a.pickup_date_sk=d.date_sk
                 where d.month_start in (select source_month from analytics.recon_bronze_silver)""",
+            "previous": """
+                select to_char(max(previous_month), 'Mon YYYY') from analytics.mv_revenue_bridge
+                where is_latest_month""",
+            "volume_effect": """
+                select amount from analytics.mv_revenue_bridge where is_latest_month and step_order = 2""",
+            "price_effect": """
+                select amount from analytics.mv_revenue_bridge where is_latest_month and step_order = 3""",
         },
         insight_template=(
-            "**So what?** Over {months} complete months ({first} to {last}), valid trips changed "
-            "by **{trip_change} %** and revenue by **{rev_change} %** in the latest month versus "
-            "the month before. The CBD congestion fee is **{cbd_share} %** of revenue in the "
-            "latest month: part of the revenue change is a new fee, not more activity. "
-            "{valid_rate} % of trips are valid; the trends above use valid trips only.\n\n"
-            "**Next question:** is the revenue change explained by volume, distance or fees? "
-            "Open *Fare, Payment and Customer Signals* and compare average fare with revenue per mile."
+            "### So what?\n"
+            "- In **{last}**, trips **{trip_change_text}** and revenue **{rev_change_text}** "
+            "compared with {previous}.\n"
+            "- {volume_effect_text}, and {price_effect_text} (see the revenue bridge).\n"
+            "- The CBD congestion fee, charged since 5 January 2025, makes up "
+            "**{cbd_share} %** of revenue.\n"
+            "- **{valid_rate} %** of trips pass the quality checks. Every figure here uses "
+            "those trips only.\n\n"
+            "**Next question:** why did revenue per trip change: shorter trips or different "
+            "fares? See *4. Fare, Payment and Customer Signals*."
         ),
         filter_datasets=["trips_daily"],
     ),
@@ -661,12 +712,13 @@ DASHBOARDS = [
                 where quality_status='valid' and d.month_start in (select source_month from analytics.recon_bronze_silver)""",
         },
         insight_template=(
-            "**So what?** The busiest slot is **{peak}**; demand is lowest around **{low}**. "
-            "Airport trips are **{airport_share} %** of valid trips and peak at different hours "
-            "from city trips (chart above), so airport and city capacity should be planned "
-            "separately. Trip volume is a proxy for demand: unserved demand is not visible.\n\n"
-            "**Next question:** do the evening peaks hold on public holidays? Filter the day "
-            "type and compare with *City and Airport Strategy*."
+            "### So what?\n"
+            "- Demand peaks on **{peak}** and is lowest around **{low}**.\n"
+            "- Airport trips are **{airport_share} %** of all trips and peak at different "
+            "hours from city trips: plan airport and city capacity separately.\n"
+            "- Trip counts show rides that happened, not riders who could not find a taxi.\n\n"
+            "**Next question:** do the evening peaks hold on public holidays? Use the *Day "
+            "type* lines above."
         ),
         filter_datasets=["trips_hourly"],
     ),
@@ -803,8 +855,44 @@ DASHBOARDS = [
                     height=55,
                 ),
             ],
+            "Where trips are growing and declining (latest month versus the month before)",
+            [
+                Chart(
+                    "Fastest-growing drop-off zones",
+                    "dropoff_growth",
+                    "hbar",
+                    "Which drop-off zones are growing fastest? Zones with at least 500 trips "
+                    "in the previous month.",
+                    ["zone_trip_change"],
+                    "dropoff_zone",
+                    limit=10,
+                    y_format=".1%",
+                    width=6,
+                    height=55,
+                ),
+                Chart(
+                    "Fastest-declining drop-off zones",
+                    "dropoff_growth",
+                    "hbar",
+                    "Which drop-off zones are declining fastest? Zones with at least 500 trips "
+                    "in the previous month.",
+                    ["zone_trip_change"],
+                    "dropoff_zone",
+                    limit=10,
+                    ascending=True,
+                    y_format=".1%",
+                    width=6,
+                    height=55,
+                ),
+            ],
         ],
         insight_sql={
+            "growth_zone": """
+                select dropoff_zone from analytics.mv_dropoff_growth
+                order by trip_change_pct desc nulls last limit 1""",
+            "growth_pct": """
+                select round(trip_change_pct, 1) from analytics.mv_dropoff_growth
+                order by trip_change_pct desc nulls last limit 1""",
             "top_zone": """
                 select z.zone_name from analytics.agg_trips_daily a
                 join analytics.dim_zone z on a.pickup_zone_sk=z.zone_sk
@@ -820,13 +908,15 @@ DASHBOARDS = [
                 group by 1 order by sum(trip_count) desc limit 1""",
         },
         insight_template=(
-            "**So what?** **{manhattan_share} %** of valid trips start in Manhattan and the "
-            "busiest pickup zone is **{top_zone}**; the most common route is **{top_route}**. "
-            "Value is concentrated: a few zones and routes decide the totals, so a change in "
-            "them moves the whole network. Coverage is biased towards Manhattan and the "
-            "airports (Yellow Taxi service area), not a city-wide measure of mobility.\n\n"
-            "**Next question:** which outer-borough routes grow fastest? Filter a borough and "
-            "compare months in the routes table."
+            "### So what?\n"
+            "- **{manhattan_share} %** of trips start in Manhattan. The busiest pickup zone is "
+            "**{top_zone}** and the most common route is **{top_route}**.\n"
+            "- The fastest-growing drop-off zone is **{growth_zone}**: **{growth_pct} %** more "
+            "trips than the month before.\n"
+            "- A few zones drive the totals, so a change there moves the whole network. Yellow "
+            "taxis serve mostly Manhattan and the airports: this is not the whole city.\n\n"
+            "**Next question:** are outer-borough routes growing too? Filter a borough in the "
+            "left panel."
         ),
         filter_datasets=["trips_daily", "routes_monthly"],
     ),
@@ -948,13 +1038,15 @@ DASHBOARDS = [
                 from analytics.agg_trips_daily a join analytics.dim_payment_type p on a.payment_type_sk=p.payment_type_sk""",
         },
         insight_template=(
-            "**So what?** Card trips are **{card_share} %** of valid trips in the latest month, "
-            "and card passengers tip **{tip_rate} %** of the fare. Tips are recorded for card "
-            "payments only, so a lower card share would lower *recorded* tips without any change "
-            "in behaviour. **{not_reported} %** of all trips have no payment type reported "
-            "(vendor gap, not a customer choice).\n\n"
-            "**Next question:** does revenue per mile rise because of the CBD fee or because "
-            "of shorter trips? Compare it with average distance week by week."
+            "### So what?\n"
+            "- **{card_share} %** of trips are paid by card, and card riders tip **{tip_rate} %** "
+            "of the fare.\n"
+            "- Tips are only recorded for card payments: fewer card trips would mean fewer "
+            "*recorded* tips, not less generous riders.\n"
+            "- **{not_reported} %** of trips have no payment type: a gap in vendor data, not a "
+            "rider choice.\n\n"
+            "**Next question:** is revenue per mile moving because of the congestion fee or "
+            "because trips are shorter? Compare the two weekly charts."
         ),
         filter_datasets=["trips_daily"],
     ),
@@ -1103,8 +1195,42 @@ DASHBOARDS = [
                     width=6,
                 ),
             ],
+            "Routes slower than usual",
+            [
+                Chart(
+                    "Routes with the biggest gap between usual and current duration",
+                    "route_duration_anomaly",
+                    "raw",
+                    "Which routes show the biggest gap between normal and current duration? "
+                    "Latest month versus earlier months, by service period (at least 100 trips "
+                    "in both). Score above 3: an unusual slowdown compared with all routes.",
+                    columns=[
+                        "route",
+                        "service_period_name",
+                        "baseline_avg_minutes",
+                        "current_avg_minutes",
+                        "duration_gap_pct",
+                        "robust_z",
+                        "current_trips",
+                    ],
+                    sort_by="robust_z",
+                    filters=[{"col": "robust_z", "op": "IS NOT NULL", "val": None}],
+                    limit=25,
+                    width=12,
+                    height=60,
+                ),
+            ],
         ],
         insight_sql={
+            "slow_route": """
+                select route from analytics.mv_route_duration_anomaly
+                order by robust_z desc nulls last limit 1""",
+            "slow_period": """
+                select service_period_name from analytics.mv_route_duration_anomaly
+                order by robust_z desc nulls last limit 1""",
+            "slow_gap": """
+                select duration_gap_pct from analytics.mv_route_duration_anomaly
+                order by robust_z desc nulls last limit 1""",
             "invalid": """
                 select round(100.0*sum(invalid_trip_count)/sum(trip_count),1) from analytics.agg_quality_daily
                 where source_month = (select max(source_month) from analytics.recon_bronze_silver)""",
@@ -1118,15 +1244,18 @@ DASHBOARDS = [
             "unexplained": "select coalesce(sum(unexplained_rows),0) from analytics.recon_bronze_silver",
         },
         insight_template=(
-            "**So what?** In the latest month **{invalid} %** of trips are invalid, mostly "
-            "negative amounts (**{negative} %**: refunds and disputes, not taxi activity). "
-            "**{worst_vendor}** has the highest suspicious-trip share among large vendors: "
-            "review its data before comparing vendors. Bronze to silver reconciliation shows "
-            "**{unexplained} unexplained rows**. Decisions should pause when the valid-trip rate "
-            "falls below 85 % or a pipeline signal is *fail* (the publication gate already "
-            "blocks the data in that case).\n\n"
-            "**Next question:** are the long durations real congestion or data errors? Compare "
-            "the duration-by-hour chart with the implausible-speed share."
+            "### So what?\n"
+            "- **{invalid} %** of trips in the latest month are invalid; **{negative} %** have "
+            "a negative amount (refunds and disputes, not real rides).\n"
+            "- **{worst_vendor}** has the most suspicious trips: check its data before "
+            "comparing vendors.\n"
+            "- The most unusual slowdown is **{slow_route}** ({slow_period}): "
+            "**{slow_gap} %** longer than usual.\n"
+            "- Every loaded row is accounted for: **{unexplained}** unexplained rows.\n\n"
+            "**Pause decisions** when the valid-trip rate falls below 85 % or a pipeline "
+            "signal fails (the publication gate then keeps the previous data).\n\n"
+            "**Next question:** is that slowdown real traffic or a data issue? Compare it with "
+            "the implausible-speed share."
         ),
         filter_datasets=["quality_daily"],
     ),
@@ -1212,23 +1341,23 @@ DASHBOARDS = [
                 from analytics.agg_trips_daily a join analytics.dim_zone z on a.pickup_zone_sk=z.zone_sk
                 where quality_status='valid'""",
             "co2_t": """
-                select round(sum(sum_trip_distance) filter (where quality_status='valid')*0.400/1000)
+                select to_char(round(sum(sum_trip_distance) filter (where quality_status='valid')*0.400/1000), 'FM999,999,999')
                 from analytics.agg_trips_daily a join analytics.dim_date d on a.pickup_date_sk=d.date_sk
                 where d.month_start = (select max(source_month) from analytics.recon_bronze_silver)""",
         },
         insight_template=(
-            "**So what? Three evidence-backed actions for next month:**\n\n"
-            "1. **Plan airport capacity separately**: airport trips are **{airport_share} %** of "
-            "valid trips with their own hourly profile. *Validate*: hourly airport demand on "
-            "the next month, by terminal zone.\n"
-            "2. **Review outer-borough coverage before acting**: they are only **{outer_share} %** "
-            "of Yellow trips. Low volume is a proxy, not proof of unmet need. *Validate*: add "
-            "For-Hire Vehicle and Green Taxi data and wait times before any service decision.\n"
-            "3. **Track the CBD congestion fee effect**: compare revenue per mile and trips in "
-            "the charging zone month by month. *Validate*: a before/after comparison including "
-            "December 2024 (before the fee).\n\n"
-            "Estimated CO2 for the latest month: about **{co2_t} t** (distance x 0.400 kg/mile, "
-            "US EPA typical vehicle): an estimate, not a measurement."
+            "### So what? Three actions for next month\n"
+            "1. **Plan airport capacity on its own.** Airport trips are **{airport_share} %** of "
+            "all trips and follow their own hours. *To confirm:* hourly airport demand next "
+            "month, by airport.\n"
+            "2. **Do not cut outer-borough service on this data alone.** They are only "
+            "**{outer_share} %** of Yellow trips, and low volume does not prove low need. "
+            "*To confirm:* add Green taxi and for-hire vehicle data, and wait times.\n"
+            "3. **Track the congestion fee.** Compare trips and revenue per mile in the "
+            "charging zone each month. *To confirm:* a before and after view including "
+            "December 2024, before the fee.\n\n"
+            "Estimated CO2 for the latest month: about **{co2_t} tonnes**. This is an estimate "
+            "(distance x 0.400 kg per mile, US EPA typical car), not a measurement."
         ),
         filter_datasets=["trips_daily", "trips_hourly"],
     ),
@@ -1236,6 +1365,44 @@ DASHBOARDS = [
 
 
 # ------------------------------------------------------------------------------ building
+
+
+def change_text(value: str) -> str:
+    """'rose by 2.6 %', 'fell by 1.3 %' or 'stayed flat': easier to read than a signed number."""
+    if value == "n/a":
+        return "n/a"
+    pct = float(value)
+    if abs(pct) < 0.05:
+        return "stayed flat"
+    return f"{'rose' if pct > 0 else 'fell'} by {abs(pct):.1f} %"
+
+
+def money_text(value: str) -> str:
+    """'added $1.6M' or 'removed $1.3M' for a revenue effect in USD."""
+    if value == "n/a":
+        return "n/a"
+    amount = float(value)
+    size = f"${abs(amount) / 1e6:.1f}M" if abs(amount) >= 1e6 else f"${abs(amount) / 1e3:.0f}k"
+    return f"{'added' if amount >= 0 else 'removed'} **{size}**"
+
+
+# What a positive or negative effect means, so the sentence names the real cause.
+EFFECT_SUBJECTS = {
+    "volume_effect": ("More trips", "Fewer trips"),
+    "price_effect": ("higher revenue per trip", "lower revenue per trip"),
+}
+
+
+def readable(values: dict[str, str]) -> dict[str, str]:
+    """Adds a plain-English twin to each change (`*_change`) and effect (`*_effect`)."""
+    for key, value in list(values.items()):
+        if key.endswith("_change"):
+            values[f"{key}_text"] = change_text(value)
+        elif key.endswith("_effect"):
+            up, down = EFFECT_SUBJECTS.get(key, ("The change", "The change"))
+            subject = down if value != "n/a" and float(value) < 0 else up
+            values[f"{key}_text"] = f"**{subject}** {money_text(value)}"
+    return values
 
 
 def facts(sql: dict[str, str]) -> dict[str, str]:
@@ -1260,7 +1427,7 @@ def facts(sql: dict[str, str]) -> dict[str, str]:
         cur.execute("select published_at, run_id from analytics.pipeline_status")
         published_at, run_id = cur.fetchone()
     values["stamp"] = f"Computed from publication `{run_id}` ({published_at:%Y-%m-%d %H:%M} UTC)."
-    return values
+    return readable(values)
 
 
 def ensure_chart(
@@ -1350,7 +1517,7 @@ def layout(rows: list[list[tuple[str, int | str, Chart | None]]], title: str) ->
                     "meta": {
                         "code": value,
                         "width": 12,
-                        "height": 8 if str(value).startswith("### ") else 50,
+                        "height": 8 if kind == "HEADING" else 50,
                     },
                 }
     return pos
@@ -1449,7 +1616,7 @@ def build(api: Superset, spec: Dashboard, dataset_ids: dict[str, int]) -> int:
     rows: list = [[("MARKDOWN", header, None)]]
     for row in spec.rows:
         if isinstance(row, str):  # section heading
-            rows.append([("MARKDOWN", f"### {row}", None)])
+            rows.append([("HEADING", f"### {row}", None)])
             continue
         built = []
         for item in row:
@@ -1475,6 +1642,9 @@ def main() -> int:
         "trips_hourly",
         "routes_monthly",
         "quality_daily",
+        "revenue_bridge",
+        "dropoff_growth",
+        "route_duration_anomaly",
         "pipeline_health",
         "source_reconciliation",
         "pipeline_status",

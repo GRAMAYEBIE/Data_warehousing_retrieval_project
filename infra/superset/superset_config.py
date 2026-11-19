@@ -26,9 +26,11 @@ CACHE_CONFIG = {
     "CACHE_KEY_PREFIX": "superset_meta_",
     "CACHE_REDIS_URL": f"redis://{REDIS_HOST}:{REDIS_PORT}/0",
 }
+# Chart results: the published layer changes once per pipeline run, so a day of cache is
+# safe. The dashboard build runs every chart's query, which warms this cache.
 DATA_CACHE_CONFIG = {
     "CACHE_TYPE": "RedisCache",
-    "CACHE_DEFAULT_TIMEOUT": 3600,
+    "CACHE_DEFAULT_TIMEOUT": 86400,
     "CACHE_KEY_PREFIX": "superset_data_",
     "CACHE_REDIS_URL": f"redis://{REDIS_HOST}:{REDIS_PORT}/1",
 }

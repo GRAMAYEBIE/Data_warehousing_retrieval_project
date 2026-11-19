@@ -103,6 +103,50 @@ def published_values(
     return values, publication
 
 
+def superset_values() -> dict[tuple[str, date], Decimal]:
+    """The metric as a Superset chart computes it: chart data API on the certified dataset.
+
+    Skipped (empty) when SUPERSET_URL is not set. The datasets show complete months only.
+    """
+    url = os.environ.get("SUPERSET_URL")
+    if not url:
+        return {}
+    import requests  # installed with dbt-core
+
+    http = requests.Session()
+    token = http.post(f"{url}/api/v1/security/login", timeout=300, json={
+        "username": "admin", "password": os.environ["SUPERSET_ADMIN_PASSWORD"],
+        "provider": "db", "refresh": False}).json()["access_token"]
+    http.headers["Authorization"] = f"Bearer {token}"
+    http.headers["X-CSRFToken"] = http.get(f"{url}/api/v1/security/csrf_token/",
+                                           timeout=300).json()["result"]
+    http.headers["Referer"] = url
+
+    def dataset_id(name: str) -> int:
+        q = json.dumps({"filters": [{"col": "table_name", "opr": "eq", "value": name}]})
+        return http.get(f"{url}/api/v1/dataset/", params={"q": q}, timeout=300).json()[
+            "result"][0]["id"]
+
+    ids = {"trips_daily": dataset_id("trips_daily"), "trips_hourly": dataset_id("trips_hourly")}
+    values = {}
+    for metric in METRICS:
+        dataset = "trips_hourly" if metric == "trips_per_active_hour" else "trips_daily"
+        body = {
+            "datasource": {"id": ids[dataset], "type": "table"},
+            "queries": [{"columns": ["month_start"], "metrics": [metric], "row_limit": 100}],
+            "result_format": "json",
+            "result_type": "full",
+        }
+        result = http.post(f"{url}/api/v1/chart/data", json=body, timeout=300).json()
+        for row in result["result"][0]["data"]:
+            raw = row["month_start"]
+            month = (datetime.fromtimestamp(raw / 1000, UTC).date() if isinstance(raw, (int, float))
+                     else date.fromisoformat(str(raw)[:10]))
+            if row.get(metric) is not None:
+                values[(metric, month)] = Decimal(str(row[metric]))
+    return values
+
+
 def load_catalog() -> dict[str, dict]:
     manifest = json.loads((PROJECT_DIR / "target" / "semantic_manifest.json").read_text())
     return {m["name"]: m["config"]["meta"] for m in manifest["metrics"]}
@@ -141,19 +185,26 @@ def main() -> int:
     months = sorted({month for (_, month) in published})
 
     loaded = loaded_source_months()
+    superset = superset_values()
     rows, mismatches = [], 0
     for month in months:
         for metric in METRICS:
             a, b = mf.get((metric, month)), published.get((metric, month))
+            s = superset.get((metric, month))
             if a is None and b is None:
                 # Both surfaces agree there is no value (e.g. the CBD fee before 2025-01).
                 ok, result = True, "match (no value on either surface)"
             else:
                 ok = a is not None and b is not None and same(a, b)
                 result = "match" if ok else "MISMATCH"
+            if superset and month in loaded and (a is not None or s is not None):
+                # Superset shows complete months only, by design of its datasets.
+                if s is None or a is None or not same(a, s):
+                    ok, result = False, "MISMATCH (Superset)"
             mismatches += not ok
             label = f"{month:%Y-%m}" + ("" if month in loaded else " (partial)")
-            rows.append((label, metric, a, b, result))
+            shown_s = fmt(s) if month in loaded else "not shown (partial month)"
+            rows.append((label, metric, a, b, shown_s if superset else "not run", result))
 
     lines = [
         "# Metric parity: same metric, same value on every surface (Q6.4)",
@@ -165,7 +216,9 @@ def main() -> int:
         "- **dbt / MetricFlow**: `mf query --group-by metric_time__month` on `gold.fct_trip`.",
         "- **Published SQL**: the metric's `sql_expression` from the dbt YAML over the",
         "  `analytics` aggregates, run as `ai_reader` (the AI assistant's read-only role).",
-        "- **Superset**: added in wave 4 (chart data API).",
+        "- **Superset**: the chart data API on the certified dataset (`trips_daily`, or",
+        "  `trips_hourly` for trips_per_active_hour), with the metric Superset holds, copied",
+        "  from the same YAML by metrics-sync. Superset shows complete months only.",
         "",
         f"Tolerance: relative difference at most {RELATIVE_TOLERANCE}. "
         f"Result: **{len(rows) - mismatches} of {len(rows)} values match**.",
@@ -175,11 +228,11 @@ def main() -> int:
         "on their real pickup date). Dashboards and the AI assistant show complete months",
         "only; the rows are kept here to prove both surfaces treat them identically.",
         "",
-        "| Pickup month | Metric | dbt / MetricFlow | Published SQL | Result |",
-        "|---|---|---|---|---|",
+        "| Pickup month | Metric | dbt / MetricFlow | Published SQL (AI role) | Superset chart | Result |",
+        "|---|---|---|---|---|---|",
     ]
-    for label, metric, a, b, result in rows:
-        lines.append(f"| {label} | `{metric}` | {fmt(a)} | {fmt(b)} | {result} |")
+    for label, metric, a, b, s, result in rows:
+        lines.append(f"| {label} | `{metric}` | {fmt(a)} | {fmt(b)} | {s} | {result} |")
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
     OUTPUT.write_text("\n".join(lines) + "\n", encoding="utf-8")
 

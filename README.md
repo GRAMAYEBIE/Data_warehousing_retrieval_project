@@ -21,8 +21,8 @@ that is not implemented yet.
 | 1 | Docker Compose core, warehouse schemas and roles, landing zone, idempotent ingestion, bronze layer, manifest | **Built and verified** |
 | 2 | dbt: silver, quality flags, star schema, aggregates, tests, reconciliation | **Built and verified** (94/94 build steps green on two months) |
 | 3 | Airflow orchestration, publication gate, operational signals | **Built and verified** (successful run, failure and recovery, safe re-run) |
-| 4 | Semantic layer, Superset, six dashboards | **Built**: semantic layer, metric parity (40/40), Superset with 7 certified datasets and 6 dashboards (51 charts, each verified to return data); visual review and the Superset parity surface pending |
-| 5 | AI assistant: API, web interface, evaluation pack | Planned |
+| 4 | Semantic layer, Superset, six dashboards | **Built and verified**: semantic layer, metric parity 40/40 on three surfaces (MetricFlow, published SQL, Superset), 10 certified datasets, 6 dashboards (55 charts, each verified to return data) |
+| 5 | AI assistant: API, web interface, evaluation pack | **In progress**: API built and unit-tested (24 tests); live run with Ollama, evaluation pack, web interface pending |
 | 6 | Extensions: Prometheus/Grafana, Kafka, MLflow | Planned, optional |
 
 Loaded and published so far: `2024-12` (3,668,371 rows), `2025-01` (3,475,226 rows) and
@@ -146,8 +146,11 @@ bronze and 40 to 45 GB with silver and gold.
 swap and PostgreSQL lost a process during a dbt build while Airflow was running (see
 `docs/evidence/q05/README.md`). `infra/wsl/wslconfig.example` keeps 4 GB of RAM for Docker
 and adds 12 GB of swap on a data drive; copy it to `%USERPROFILE%\.wslconfig`, run
-`wsl --shutdown` and restart Docker Desktop. The pipeline also runs one task at a time by
-default (`PIPELINE_MAX_ACTIVE_TASKS=1`). On a larger machine, raise both.
+`wsl --shutdown` and restart Docker Desktop. It also gives the VM **3 of the 4 CPUs**: with
+all 4, the kernel log showed "soft lockup" warnings (a CPU starved for more than 20 s) and
+PostgreSQL backends were killed; leaving one CPU to Windows stopped it. PostgreSQL runs
+without parallel workers or JIT, and the pipeline runs one task at a time
+(`PIPELINE_MAX_ACTIVE_TASKS=1`). On a larger machine, raise all of them.
 A demonstration mode (`DEMO_MODE=true`) will limit the platform to one month and a small
 LLM (`qwen2.5:3b`).
 
@@ -174,7 +177,7 @@ POSTGRESQL 16 — database `warehouse` ─────────────�
      │
      │  ═══ PUBLICATION GATE: only if the whole dbt build is green ═══
      ▼
-  analytics materialized views = published copy of the gold agg_* tables
+  analytics published copy of the approved gold tables + BI materialized views on that copy
   semantic  metric_catalog (generated from the dbt metric YAML)
   ops       ingestion_manifest, pipeline_runs, pipeline_signals, ai_audit_log
 ─────────────────────────────────────────────────────────────────────────
@@ -203,11 +206,11 @@ file can be proven. Moving to a cloud object store only changes the endpoint in 
 2. **Land**: download → validation (Parquet magic bytes, size, SHA-256) → RustFS `raw/yellow/year=YYYY/month=MM/` → row in `ops.ingestion_manifest`. Unchanged source ⇒ `skipped_unchanged`.
 3. **Bronze**: the month partition is replaced, loaded with `COPY`.
 4. **dbt build** through Cosmos: staging → silver → blocking tests → gold → aggregates → tests. A failing silver test makes dbt skip everything downstream, so gold is untouched.
-5. **Publish**: `REFRESH MATERIALIZED VIEW CONCURRENTLY` on `analytics`, **only if step 4 is green**. Otherwise users keep the previous state and an alert is sent.
-6. **metrics-sync**: metric YAML → certified Superset datasets + `semantic.metric_catalog`.
-7. **Operational signals** written to `ops.pipeline_signals`; notification (log + webhook/email).
+5. **Publish**: the approved gold tables are copied to `analytics` and swapped, and the BI materialized views are rebuilt on the copy, in **one transaction**, **only if step 4 is green**. Otherwise users keep the previous state and an alert is sent.
+6. **Refresh Superset**: metric YAML → `semantic.metric_catalog` and certified Superset datasets (which invalidates the chart cache), then the six dashboards are rebuilt from the new publication.
+7. **Operational signals** written to `ops.pipeline_signals`; notification (log + webhook).
 
-Steps 1 to 3 are built. Steps 4 to 7 are planned.
+Every step runs in the Airflow DAG.
 
 ---
 
@@ -215,7 +218,7 @@ Steps 1 to 3 are built. Steps 4 to 7 are planned.
 
 | Decision | Justification |
 |---|---|
-| **Publication gate** | Superset and the AI assistant read **only** `analytics` (materialized views), refreshed by a separate Airflow task when the whole `dbt build` is green. dbt tests a table *after* writing it: without this gate, a failed test would leave wrong numbers visible. |
+| **Publication gate** | Superset and the AI assistant read **only** `analytics` (a copy of the approved gold tables), replaced by a separate Airflow task when the whole `dbt build` is green. dbt tests a table *after* writing it: without this gate, a failed test would leave wrong numbers visible. |
 | **Deterministic technical identifier** | `(source_month, file_row_number)` instead of a database sequence: keys are identical after a reload, and a trip can be traced back to its exact row in the raw file. |
 | **Additive aggregates only** | Aggregate tables store sums and counts; averages and ratios are computed at read time. An average of averages is wrong. |
 | **Each metric formula is written once** | In the `meta:` block of the dbt YAML. Superset and the AI assistant copy it through `metrics-sync`. This makes the Q6 consistency check verifiable. |
@@ -416,8 +419,8 @@ date literals: PostgreSQL then prunes bronze partitions at plan time and estimat
 boundary-day filters correctly. With a subquery instead, the silver build did not finish
 in 9 minutes for one month; with literals it takes about 9 minutes for two.
 
-The `analytics` materialized views are created by `infra/postgres` and refreshed by the
-publication task, **not** by dbt.
+The `analytics` schema is written by the publication task (`airflow/include/nyc_taxi_ops/publish.py`),
+**not** by dbt.
 
 ### Silver quality rules (Q3)
 
@@ -515,10 +518,23 @@ flag. Tests fail when `unexplained_rows` is not 0 or `unexplained_amount` is not
 | `agg_trips_hourly` (383,826 rows) | day × hour × pickup zone × service period × airport flag × status | Dashboards 2, 6; `trips_per_active_hour` |
 | `agg_routes_monthly` (110,618 rows) | month × pickup zone × dropoff zone × service period, valid trips | Dashboards 3, 6 |
 | `agg_quality_daily` (76,243 rows) | source month × day × vendor × pickup zone × payment type, trips per status and per flag | Dashboard 5 |
-| `agg_route_duration_baseline` (planned) | route × hour: reference median and MAD versus current month (robust z-score) | Dashboard 5 |
-| `ops_freshness`, `ops_batches` (planned, wave 3) | per month / per batch | "last refreshed" tile, Dashboards 1 and 5 |
+| `pipeline_status`, `pipeline_signals`, `recon_bronze_silver` | per publication / run / source month | "last refreshed" tile, Dashboard 5 |
 
-Every materialized view has a unique index (required by `REFRESH ... CONCURRENTLY`).
+**BI materialized views** (`BI_VIEWS` in `publish.py`). They are built on the published
+copies (never on gold) inside the publication transaction: dropped before the swap and
+recreated after it, indexed, analysed, readable by `superset_reader` and `ai_reader`.
+Superset datasets point to them, so a chart reads a few thousand pre-joined rows instead of
+joining the aggregates to the dimensions on every click.
+
+| View | Rows (Dec 2024 – Feb 2025 published) | Answers |
+|---|---|---|
+| `mv_trips_daily`, `mv_trips_hourly`, `mv_routes_monthly`, `mv_quality_daily` | 263,323 / 591,465 / 175,616 / 113,217 | aggregates joined to their dimensions (datasets of dashboards 1 to 6) |
+| `mv_revenue_bridge` | 6 | "Is revenue rising because there are more trips or higher fares?" previous revenue + volume effect + price effect = revenue, exactly (Feb 2025: 84,627,384.68 + 1,591,753.75 − 1,288,691.83 = 84,930,446.60) |
+| `mv_dropoff_growth` | 164 | fastest-growing and fastest-declining drop-off zones, latest month versus the month before, zones with at least 500 trips |
+| `mv_route_duration_anomaly` | 5,354 | routes slower than usual: latest month versus earlier months per route and service period (at least 100 trips in both), robust z-score `(gap − median) / (1.4826 × MAD)` across routes |
+
+The three analyses are derived indicators built from governed metrics; they are labelled
+"Derived indicator (not a governed metric)" in Superset.
 
 ### dbt tests
 
@@ -559,7 +575,7 @@ hence the base metrics. The generated catalogue is `docs/metric_catalog.md`
 Metrics are defined in `dbt/models/semantic/*.yml` (MetricFlow), the **single source of
 truth**. Each metric carries in `meta:` its `owner`, `sql_expression` (an aggregate
 expression on an `analytics` table), `base_table`, `grains`, `dimensions`, `filters` and
-`is_estimate`. Default owner: `AYEBIE GRAM MESCHAC (Data Team)`. Grains: day, week, month (and hour for
+`is_estimate`. Default owner: `AYEBIE GRAM MESCHAC`. Grains: day, week, month (and hour for
 demand).
 
 | # | Metric | Formula (at read time, on aggregates) | Filters and rules |
@@ -583,10 +599,13 @@ certified Superset datasets through the REST API (metrics, descriptions, owners)
 (2) generates `semantic.metric_catalog` for the AI assistant. It does not translate
 anything: it copies `sql_expression`.
 
-**Consistency test (Q6.4)**: `tests/consistency/test_metric_parity.py` computes
-`total_revenue` and `trips` for one month through (i) `mf query` on `fct_trip`, (ii) the
-Superset chart data API, (iii) the FastAPI endpoint. The three values must be identical;
-the result is exported to `docs/evidence/q6/reconciliation.md`.
+**Consistency test (Q6.4)**: `tests/consistency/metric_parity.py` computes eight metrics
+month by month through (i) `mf query` on `fct_trip` (MetricFlow), (ii) the published SQL
+read with `ai_reader` (what the AI assistant runs), (iii) the Superset chart data API. The
+values must be identical; the result is written to `docs/evidence/q06/reconciliation.md`.
+Last run (18 November 2026): **40/40 match on the three surfaces** (December 2024 to
+February 2025 complete; the November 2024 and March 2025 stragglers are partial months that
+MetricFlow and SQL agree on and Superset does not show).
 
 **Stated limitation**: open-source MetricFlow is not queried directly by Superset. The
 governed fallback is `sql_expression` with certified datasets, controlled by the
@@ -613,18 +632,30 @@ docker compose --profile core --profile tools run --rm -e SUPERSET_URL=http://su
 - `infra/superset/`: image (official 6.1.0 plus the PostgreSQL driver), configuration
   (Redis caches, one MetroMove colour palette, cross filters, dashboard RBAC).
 - `services/metrics_sync/superset_sync.py`: the read-only database connection
-  (`superset_reader`, `analytics` only), seven certified virtual datasets limited to
-  complete months, and on each dataset every governed metric whose expression only uses
-  its columns (23 on `trips_daily`, 11 on `trips_hourly`, 15 on `routes_monthly`), copied
-  from the dbt YAML. The quality dataset gets one share per status and flag (18),
-  generated from its columns. Role `Analyst Manhattan` with a row-level security rule.
-- `services/metrics_sync/dashboards.py`: six dashboards, 51 charts of 14 kinds (trend
+  (`superset_reader`, `analytics` only), ten certified virtual datasets on the BI
+  materialized views and operational tables, and on each dataset every governed metric
+  whose expression only uses its columns (23 on `trips_daily`, 11 on `trips_hourly`, 15
+  on `routes_monthly`), copied from the dbt YAML. The quality dataset gets one share per
+  status and flag (18), generated from its columns. The three analysis datasets (revenue
+  bridge, drop-off growth, route duration anomaly) carry derived indicators, labelled as
+  such. Role `Analyst Manhattan` with a row-level security rule on 5 datasets.
+- `services/metrics_sync/dashboards.py`: six dashboards, 55 charts of 15 kinds (trend
   KPIs, dual-axis bars and line, rolling mean, heatmap, origin-destination matrix,
-  bubble chart, treemap, rankings, tables). Every chart description states the strategic
-  question it answers. Every dashboard has a header with its question, a data-quality
-  tile, a "last refreshed" tile, date and borough filters, cross filters, and a "So what?"
-  block computed from the published tables at build time and dated with the publication.
-  Borough colours are fixed across dashboards.
+  bubble chart, treemap, revenue waterfall, growth and decline rankings, anomaly table).
+  Every chart description states the strategic question it answers. Every dashboard has
+  a header with its question, a data-quality tile, a "last refreshed" tile, date and
+  borough filters, cross filters, and a short "So what?" block in plain English (bullets,
+  "rose by" / "fell by" rather than signed numbers), computed from the published tables
+  at build time and dated with the publication. Borough colours are fixed across
+  dashboards. Unit tests check that every number quoted in a "So what?" block has a query.
+- **Speed and automatic refresh**: chart results are cached for 24 hours in Redis. The
+  cache key includes the dataset's last-change time. After each publication, the DAG task
+  `refresh_dashboards` runs `metrics_sync.py database`, `superset_sync.py` (the datasets
+  change, so the previous publication's cached results are no longer served) and
+  `dashboards.py` (charts and "So what?" texts recomputed, every chart query run once to
+  refill the cache). If Superset is not running at that moment the run still succeeds and
+  its summary says so; trigger the `refresh_dashboards` DAG once Superset is up.
+  Verified 19 November 2026: run `success` in 5 min 11 s, datasets changed at refresh time.
 - Superset's web worker timeout is raised to 300 s: with the default 60 s, the single
   worker was killed while loading during a dbt build.
 
@@ -761,7 +792,7 @@ Airflow 3.3.1 (LocalExecutor) with astronomer-cosmos 1.16.0. Code:
 ```
 resolve_run → check_source → land_to_rustfs → load_bronze → anything_to_publish
   → dbt_build (Cosmos: one run task + one test task per dbt model, 47 tasks)
-  → measure_signals → quality_gate_and_publish → record_outcome_and_notify
+  → measure_signals → quality_gate_and_publish → refresh_dashboards → record_outcome_and_notify
 ```
 
 | Task | What it does | Runs as |
@@ -774,7 +805,8 @@ resolve_run → check_source → land_to_rustfs → load_bronze → anything_to_
 | `dbt_build` | Cosmos renders the dbt project from its manifest; each model is a `run` task followed by a `test` task. A failing test stops everything downstream. Test results are written to `ops.dbt_test_results` by a Cosmos callback. | transformer |
 | `measure_signals` | Five operational signals written to `ops.pipeline_signals` (below). | publisher |
 | `quality_gate_and_publish` | Gate: reconciliation without gap, no `fail` signal, no failed dbt test. Then the 14 approved tables and `pipeline_status` are copied to `analytics` and swapped in **one transaction**; `ops.publications` records the batches published. | publisher |
-| `record_outcome_and_notify` | Trigger rule `all_done`: always runs. Decides `published`, `nothing_new` or `failed` from the warehouse state, logs it, posts it to `NOTIFY_WEBHOOK_URL` when set, and fails the run when the outcome is `failed`. | publisher |
+| `refresh_dashboards` | After a publication: metric catalogue, Superset datasets (cache invalidated) and the six dashboards rebuilt from the new data (`nyc_taxi_ops/bi_refresh.py`, scripts of `services/metrics_sync` mounted read-only). Superset not running is reported, not an error. Also a separate manual DAG of the same name. | publisher, Superset admin |
+| `record_outcome_and_notify` | Trigger rule `all_done`: always runs. Decides `published`, `nothing_new` or `failed` from the warehouse state, adds the dashboards status, logs it, posts it to `NOTIFY_WEBHOOK_URL` when set, and fails the run when the outcome is `failed` or when the data was published but the dashboard refresh failed. | publisher |
 
 **Why copies, not materialized views**: dbt replaces a table with `DROP TABLE ... CASCADE`
 (checked in `dbt/include/postgres/macros/relations/table/drop.sql`), which would silently
