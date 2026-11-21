@@ -10,7 +10,15 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+
+class Contract(BaseModel):
+    """Base of the models the API returns: in responses, a field with a default is always
+    present, so the OpenAPI contract marks it required (the generated TypeScript types then
+    need no undefined checks for fields the API always sends)."""
+
+    model_config = ConfigDict(json_schema_serialization_defaults_required=True)
 
 
 class Intent(StrEnum):
@@ -38,19 +46,19 @@ class Operator(StrEnum):
     not_in = "not in"
 
 
-class Filter(BaseModel):
+class Filter(Contract):
     dimension: str
     operator: Operator = Operator.eq
     values: list[str | int | bool] = Field(min_length=1, max_length=50)
 
 
-class DateRange(BaseModel):
+class DateRange(Contract):
     period: Period = Period.all_months
     start_month: str | None = Field(default=None, pattern=r"^\d{4}-(0[1-9]|1[0-2])$")
     end_month: str | None = Field(default=None, pattern=r"^\d{4}-(0[1-9]|1[0-2])$")
 
 
-class QueryPlan(BaseModel):
+class QueryPlan(Contract):
     """What the manager asked, in governed terms. Produced by the LLM, validated by code."""
 
     intent: Intent
@@ -80,7 +88,7 @@ class ReportRequest(QueryPlan):
     extra_charts: list[QueryPlan] = Field(default_factory=list, max_length=3)
 
 
-class MetricProvenance(BaseModel):
+class MetricProvenance(Contract):
     name: str
     label: str
     definition: str
@@ -90,7 +98,7 @@ class MetricProvenance(BaseModel):
     is_estimate: bool
 
 
-class Provenance(BaseModel):
+class Provenance(Contract):
     metrics: list[MetricProvenance]
     source_months: list[str]
     period_resolved: dict[str, str]
@@ -103,7 +111,7 @@ class Provenance(BaseModel):
     data_layer: str = "analytics (published layer, read-only role ai_reader)"
 
 
-class Answer(BaseModel):
+class Answer(Contract):
     session_id: str
     status: Literal[
         "answered",

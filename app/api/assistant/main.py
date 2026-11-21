@@ -15,7 +15,20 @@ from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from pydantic import BaseModel, Field
 
 from assistant import telemetry
+from assistant.api_models import (
+    CatalogView,
+    DimensionInfo,
+    Health,
+    Rejection,
+    ReportPreview,
+    ReportView,
+    SessionCreated,
+    SessionReset,
+    SessionState,
+    WarmUp,
+)
 from assistant.config import Settings
+from assistant.schemas import Answer
 from assistant.service import Assistant
 
 WARM_UP = {"state": "not started", "step_ms": {}}
@@ -67,7 +80,7 @@ class AskBody(BaseModel):
 
 
 @app.get("/health")
-def health() -> dict:
+def health() -> Health:
     assistant = get_assistant()
     try:
         catalog = assistant.catalog()
@@ -75,16 +88,16 @@ def health() -> dict:
         months = catalog.months
     except Exception as exc:  # noqa: BLE001
         database, months = f"error: {type(exc).__name__}", []
-    return {
-        "status": "ok" if database == "ok" else "degraded",
-        "database": database,
-        "model": assistant.settings.model,
-        "model_available": assistant.llm.available(),
-        "output_mode": assistant.llm.output_mode,
-        "retrieval": assistant.settings.rag,
-        "prompt_cache_warm_up": WARM_UP,
-        "complete_months": months,
-    }
+    return Health(
+        status="ok" if database == "ok" else "degraded",
+        database=database,
+        model=assistant.settings.model,
+        model_available=assistant.llm.available(),
+        output_mode=assistant.llm.output_mode,
+        retrieval=assistant.settings.rag,
+        prompt_cache_warm_up=WarmUp(**WARM_UP),
+        complete_months=months,
+    )
 
 
 @app.get("/metrics", include_in_schema=False)
@@ -94,36 +107,36 @@ def prometheus_metrics() -> Response:
 
 
 @app.get("/catalog", dependencies=[Depends(authorised)])
-def catalog() -> dict:
+def catalog() -> CatalogView:
     cat = get_assistant().catalog(refresh=True)
     from assistant.catalog import DIMENSIONS
 
-    return {
-        "metrics": cat.metrics,
-        "dimensions": {
-            d.name: {"label": d.label, "members": cat.members.get(d.name, [])}
+    return CatalogView(
+        metrics=cat.metrics,
+        dimensions={
+            d.name: DimensionInfo(label=d.label, members=cat.members.get(d.name, []))
             for d in DIMENSIONS.values()
         },
-        "complete_months": cat.months,
-        "published_run": cat.published_run,
-        "published_at": cat.published_at,
-    }
+        complete_months=cat.months,
+        published_run=cat.published_run,
+        published_at=cat.published_at,
+    )
 
 
 @app.post("/sessions", dependencies=[Depends(authorised)])
-def new_session() -> dict:
-    return {"session_id": get_assistant().new_session().session_id}
+def new_session() -> SessionCreated:
+    return SessionCreated(session_id=get_assistant().new_session().session_id)
 
 
 @app.post("/sessions/{session_id}/ask", dependencies=[Depends(authorised)])
-def ask(session_id: str, body: AskBody):
+def ask(session_id: str, body: AskBody) -> Answer:
     return get_assistant().ask(body.question, session_id, body.prompt_variant)
 
 
 @app.post("/sessions/{session_id}/reset", dependencies=[Depends(authorised)])
-def reset(session_id: str) -> dict:
+def reset(session_id: str) -> SessionReset:
     session = get_assistant().reset(session_id)
-    return {"session_id": session.session_id, "active_filters": [], "status": "new analysis"}
+    return SessionReset(session_id=session.session_id, active_filters=[], status="new analysis")
 
 
 class ReportBody(BaseModel):
@@ -142,27 +155,30 @@ def get_builder():
     return ReportBuilder(get_assistant())
 
 
-def draft_view(draft) -> dict:
-    url = f"/superset/dashboard/{draft.dashboard_id}/"
-    return {
-        "report_id": draft.report_id,
-        "status": draft.status,
-        "dashboard_title": draft.title,
-        "dashboard_id": draft.dashboard_id,
-        "dashboard_url": url,
-        "chart_ids": draft.chart_ids,
-        "specification": draft.spec,
-        "preview": draft.preview,
-        "next_step": (
+def draft_view(draft) -> ReportView:
+    return ReportView(
+        report_id=draft.report_id,
+        status=draft.status,
+        dashboard_title=draft.title,
+        dashboard_id=draft.dashboard_id,
+        dashboard_url=f"/superset/dashboard/{draft.dashboard_id}/",
+        chart_ids=draft.chart_ids,
+        specification=draft.spec,
+        preview=[ReportPreview(**p) for p in draft.preview],
+        next_step=(
             "Review the draft, then POST /reports/{id}/confirm with confirm=true to publish."
             if draft.status == "draft"
             else "Published."
         ),
-    }
+    )
 
 
-@app.post("/reports", dependencies=[Depends(authorised)])
-def create_report(body: ReportBody) -> dict:
+@app.post(
+    "/reports",
+    dependencies=[Depends(authorised)],
+    responses={422: {"model": Rejection, "description": "Request refused, with the reasons"}},
+)
+def create_report(body: ReportBody) -> ReportView:
     """Plan a report, validate every chart, run the previews and create a DRAFT dashboard."""
     from assistant import guards
     from assistant.builder import BuilderError
@@ -203,7 +219,7 @@ def create_report(body: ReportBody) -> dict:
 
 
 @app.get("/reports/{report_id}", dependencies=[Depends(authorised)])
-def get_report(report_id: str) -> dict:
+def get_report(report_id: str) -> ReportView:
     draft = get_builder().drafts.get(report_id)
     if draft is None:
         raise HTTPException(status_code=404, detail="unknown report")
@@ -211,7 +227,7 @@ def get_report(report_id: str) -> dict:
 
 
 @app.post("/reports/{report_id}/confirm", dependencies=[Depends(authorised)])
-def confirm_report(report_id: str, body: ConfirmBody) -> dict:
+def confirm_report(report_id: str, body: ConfirmBody) -> ReportView:
     """Publication needs confirm=true; replacing an existing dashboard needs replace_existing."""
     from assistant.builder import BuilderError
 
@@ -226,11 +242,11 @@ def confirm_report(report_id: str, body: ConfirmBody) -> dict:
 
 
 @app.get("/sessions/{session_id}", dependencies=[Depends(authorised)])
-def session_state(session_id: str) -> dict:
+def session_state(session_id: str) -> SessionState:
     s = get_assistant().session(session_id)
-    return {
-        "session_id": s.session_id,
-        "turns": s.turns,
-        "active_filters": [f.model_dump(mode="json") for f in s.active_filters],
-        "last_plan": s.last_plan.model_dump(mode="json") if s.last_plan else None,
-    }
+    return SessionState(
+        session_id=s.session_id,
+        turns=s.turns,
+        active_filters=list(s.active_filters),
+        last_plan=s.last_plan,
+    )

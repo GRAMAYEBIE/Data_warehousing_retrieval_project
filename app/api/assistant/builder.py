@@ -235,7 +235,10 @@ class ReportBuilder:
             plans.append((extra, kind, f"{request.dashboard_title} - chart {i + 1}"))
 
         resolved_plans = [(validate(p, catalog), kind, name) for p, kind, name in plans]
-        previews = [self._preview(r, catalog) for r, _, _ in resolved_plans]
+        previews = [
+            self._preview(r, catalog) | {"title": name, "chart": kind}
+            for r, kind, name in resolved_plans
+        ]
 
         api = self.client()
         title = DRAFT_PREFIX + request.dashboard_title

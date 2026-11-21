@@ -27,6 +27,14 @@
     on quality_status = 'valid'. Unknown or missing codes point to the Unknown member
     (-1) of their dimension, so every foreign key resolves.
 #}
+{#
+    The relationship tests of this model read the role-playing views dim_pickup_zone and
+    dim_dropoff_zone. Rebuilding dim_zone drops them (DROP ... CASCADE) until their own
+    run recreates them, so this model and its tests must wait for both views. Observed on
+    load_2025_04: fct_trip.test ran in that window and failed with "relation does not exist".
+#}
+-- depends_on: {{ ref("dim_pickup_zone") }}
+-- depends_on: {{ ref("dim_dropoff_zone") }}
 {%- set months = months_to_process() %}
 
 -- trip_quality_sk is computed here (hash of the flag list), so no ref() ties this model

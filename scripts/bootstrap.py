@@ -134,9 +134,25 @@ def run_state(run_id: str) -> str | None:
     return next((r["state"] for r in runs if r["run_id"] == run_id), None)
 
 
+def airflow_ready(timeout_s: int = 1800) -> None:
+    """Wait until the Airflow CLI answers and the DAG is parsed. Not `up --wait`: on a busy
+    host the DAG processor's own health check can time out while it works normally."""
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        out = compose(
+            "load", "exec", "-T", "airflow-scheduler", "airflow", "dags", "list", "-o", "plain",
+            capture=True, check=False,
+        )  # fmt: skip
+        if DAG in out:
+            return
+        time.sleep(30)
+    raise SystemExit("Airflow did not list the pipeline DAG in time: see its logs")
+
+
 def load(months: list[str], timeout_h: float) -> None:
     say("Airflow (first start runs the database migration and dbt parse)")
-    compose("load", "up", "-d", "--wait")
+    compose("load", "up", "-d")
+    airflow_ready()
     airflow("dags", "unpause", DAG)
     for month in months:
         run_id = f"load_{month.replace('-', '_')}"

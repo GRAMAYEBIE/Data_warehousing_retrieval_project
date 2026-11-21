@@ -1,0 +1,39 @@
+# Rendered at start-up by the nginx image (envsubst): API_UPSTREAM and API_TOKEN come from
+# the container environment.
+server {
+    listen 80;
+    root /usr/share/nginx/html;
+
+    # The browser calls /api/...; nginx adds the bearer token, so it never reaches the
+    # browser. Answers can take minutes on a CPU host: long timeouts.
+    location /api/ {
+        proxy_pass http://${API_UPSTREAM}/;
+        proxy_set_header Authorization "Bearer ${API_TOKEN}";
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_read_timeout 1800s;
+        proxy_send_timeout 1800s;
+    }
+
+    # Runtime configuration read by the browser at start-up: changing a URL or showing the
+    # administrator links needs a restart, not a rebuild. Platform health (Grafana) is for
+    # administrators: hidden unless SHOW_PLATFORM_HEALTH=true, and Grafana keeps its login.
+    location = /config.json {
+        default_type application/json;
+        add_header Cache-Control "no-store";
+        return 200 '{"supersetUrl":"${SUPERSET_PUBLIC_URL}","grafanaUrl":"${GRAFANA_PUBLIC_URL}","showPlatformHealth":${SHOW_PLATFORM_HEALTH}}';
+    }
+
+    # Single-page application: every other path serves index.html.
+    location / {
+        try_files $uri /index.html;
+    }
+
+    location /assets/ {
+        expires 7d;
+        add_header Cache-Control "public, immutable";
+    }
+
+    add_header X-Content-Type-Options nosniff always;
+    add_header X-Frame-Options DENY always;
+    add_header Referrer-Policy no-referrer always;
+}

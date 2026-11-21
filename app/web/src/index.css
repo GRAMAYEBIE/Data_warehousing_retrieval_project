@@ -1,0 +1,59 @@
+@import "@fontsource-variable/inter";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    /* Larger base size: every rem-based size of the interface scales with it. */
+    font-size: 17px;
+    font-feature-settings: "cv11", "ss01";
+  }
+  body {
+    @apply bg-mist text-night-900 antialiased;
+  }
+  ::selection {
+    @apply bg-taxi-300 text-night-900;
+  }
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply rounded-full bg-slate-300;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+}
+
+@layer components {
+  .panel {
+    @apply rounded-2xl border border-slate-200/80 bg-white shadow-soft;
+  }
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold
+      transition duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-taxi-400
+      disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-taxi {
+    @apply btn bg-taxi-gradient text-night-900 shadow-glow hover:brightness-105 active:scale-[0.98];
+  }
+  .btn-night {
+    @apply btn bg-night-800 text-white hover:bg-night-700;
+  }
+  .btn-soft {
+    @apply btn border border-slate-200 bg-white text-night-700 hover:border-slate-300 hover:bg-slate-50;
+  }
+  .chip {
+    @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium;
+  }
+  .eyebrow {
+    @apply text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500;
+  }
+  .skeleton {
+    @apply animate-shimmer rounded-lg bg-slate-200;
+    background-image: linear-gradient(90deg, #e2e8f0 0px, #f1f5f9 80px, #e2e8f0 160px);
+    background-size: 800px 100%;
+  }
+}
