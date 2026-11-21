@@ -29,7 +29,7 @@ from airflow.providers.standard.operators.bash import BashOperator
 from airflow.providers.standard.operators.python import PythonOperator, ShortCircuitOperator
 from airflow.sdk import DAG, Param, get_current_context
 from cosmos import DbtTaskGroup, ExecutionConfig, ProfileConfig, ProjectConfig, RenderConfig
-from cosmos.constants import LoadMode, SourceRenderingBehavior, TestBehavior
+from cosmos.constants import LoadMode, SourceRenderingBehavior, TestBehavior, TestIndirectSelection
 
 from nyc_taxi_ops import bi_refresh, dbt_results, outcome, publish, signals
 
@@ -247,7 +247,15 @@ with DAG(
             target_name="dev",
             profiles_yml_filepath=DBT_PROJECT_DIR / "profiles.yml",
         ),
-        execution_config=ExecutionConfig(dbt_executable_path="/opt/dbt_venv/bin/dbt"),
+        execution_config=ExecutionConfig(
+            dbt_executable_path="/opt/dbt_venv/bin/dbt",
+            # A test that reads several models runs with the one built last (the others are
+            # its ancestors), never with an upstream dimension. With the default ("eager"),
+            # dim_date.test also ran the fct_trip -> dim_date relationship test: on a new
+            # warehouse fct_trip did not exist yet and the first run failed; on an existing
+            # one the test read the fact table of the previous run.
+            test_indirect_selection=TestIndirectSelection.BUILDABLE,
+        ),
         render_config=RenderConfig(
             load_method=LoadMode.DBT_MANIFEST,
             test_behavior=TestBehavior.AFTER_EACH,

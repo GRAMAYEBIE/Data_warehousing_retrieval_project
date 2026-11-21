@@ -20,4 +20,14 @@ GRANT SELECT ON ops.pipeline_runs, ops.pipeline_signals, ops.dbt_test_results,
 GRANT SELECT ON ops.ai_audit_log TO metrics_reader;
 -- Only these two published tables (status and reconciliation), not the business
 -- aggregates; the publication task grants them again each time it recreates them.
-GRANT SELECT ON analytics.pipeline_status, analytics.recon_bronze_silver TO metrics_reader;
+-- On a new warehouse they do not exist before the first publication: an unconditional
+-- GRANT failed there, which stopped the first start of PostgreSQL on a fresh clone.
+DO $$
+BEGIN
+    IF to_regclass('analytics.pipeline_status') IS NOT NULL
+       AND to_regclass('analytics.recon_bronze_silver') IS NOT NULL THEN
+        GRANT SELECT ON analytics.pipeline_status, analytics.recon_bronze_silver
+            TO metrics_reader;
+    END IF;
+END
+$$;

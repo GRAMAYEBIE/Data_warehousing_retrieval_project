@@ -28,13 +28,19 @@
     (-1) of their dimension, so every foreign key resolves.
 #}
 {#
-    The relationship tests of this model read the role-playing views dim_pickup_zone and
-    dim_dropoff_zone. Rebuilding dim_zone drops them (DROP ... CASCADE) until their own
-    run recreates them, so this model and its tests must wait for both views. Observed on
-    load_2025_04: fct_trip.test ran in that window and failed with "relation does not exist".
+    Every dimension a foreign key of this model points to is declared as a dependency, also
+    those whose key is computed here without reading them (time, service period) and the
+    role-playing zone views. Two reasons:
+    - the relationship tests run with this model (Cosmos, indirect selection "buildable")
+      only when every dimension they read is an ancestor of it;
+    - rebuilding dim_zone drops dim_pickup_zone and dim_dropoff_zone (DROP ... CASCADE)
+      until their own run recreates them; observed on load_2025_04, a test ran in that
+      window and failed with "relation does not exist".
 #}
 -- depends_on: {{ ref("dim_pickup_zone") }}
 -- depends_on: {{ ref("dim_dropoff_zone") }}
+-- depends_on: {{ ref("dim_time") }}
+-- depends_on: {{ ref("dim_service_period") }}
 {%- set months = months_to_process() %}
 
 -- trip_quality_sk is computed here (hash of the flag list), so no ref() ties this model

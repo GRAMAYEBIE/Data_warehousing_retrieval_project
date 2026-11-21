@@ -71,7 +71,8 @@ Q3, Q4, Q8 and Q9 carry 40 marks: they have priority after the base platform.
 ## 3. Quick start
 
 Requirements: Docker with Docker Compose, and Python 3 (standard library only) for the
-bootstrap. Tested with Docker 29 and Compose v5 on Windows 11.
+bootstrap. Tested with Docker 29 and Compose v5 on Windows 11 and on macOS 15 (Apple M4);
+see [Windows and macOS](#windows-and-macos) for the differences.
 
 ### One command, from a fresh clone
 
@@ -88,6 +89,29 @@ month in order (each run waited for, months already loaded are skipped), builds 
 and the six dashboards, then downloads and loads the model and checks the assistant's
 health. Each step runs alone (`env`, `core`, `load`, `bi`, `ai`) and can be run again.
 `--low-memory` stops Superset and Airflow before the assistant starts (8 GB laptop).
+
+### Windows and macOS
+
+| | Windows 11 | macOS (Apple Silicon) |
+|---|---|---|
+| Docker | Docker Desktop with the WSL 2 backend | Docker Desktop |
+| Memory for Docker | 4 GB on an 8 GB laptop, with WSL swap (see [Local resources](#local-resources)) | 10 GB on a 16 GB machine (Settings → Resources) |
+| Python command | `python scripts/bootstrap.py ...` | `python3 scripts/bootstrap.py ...` |
+| GPU for the model | `--gpu` with an NVIDIA GPU and the NVIDIA Container Toolkit | no `--gpu`: Docker on macOS cannot use the Apple GPU, the model runs on the CPU |
+| Shell for the `make` targets | Git Bash or WSL | Terminal (zsh) |
+
+The images are multi-architecture or built locally, so the same commands run on `x86_64`
+and on `arm64`. Measured on one month each (2025-04, 4.0 million trips, on the laptop;
+2024-12, 3.7 million trips, on the Mac from a fresh clone):
+
+| Step | Windows laptop (4 CPUs, 4 GB for Docker) | Mac mini M4 (10 CPUs, 10 GB for Docker) |
+|---|---|---|
+| Bronze load | 6 min | 0.3 min |
+| Silver quality flags (`int_trips_flagged`) | 53 min | 0.8 min |
+
+During a long load on macOS, keep the machine awake (`caffeinate -ims` in a terminal, or
+System Settings → Energy → "Prevent automatic sleeping when the display is off"). On
+Windows, keep the laptop plugged in and out of sleep.
 
 **Continuous integration** (`.github/workflows/ci.yml`, every push): lint, formatting and
 unit tests of the five Python components (ingestion, assistant API, metrics sync and
@@ -146,7 +170,10 @@ make run-month MONTH=2025-02          # make run-month-force MONTH=2025-02 to re
 ```
 
 Once dbt files change, refresh the manifest Cosmos reads with
-`docker compose --profile core --profile tools run --rm dbt parse`.
+`docker compose --profile core --profile tools run --rm --no-deps dbt parse` (on a fresh
+clone, run `dbt deps` the same way first: the packages are installed in the Airflow image,
+not in the standalone dbt service). `--no-deps` matters while Airflow runs: without it,
+Compose may recreate PostgreSQL to match the Compose file, which stops the running tasks.
 
 ### Evidence of the three required behaviours (Q2)
 
