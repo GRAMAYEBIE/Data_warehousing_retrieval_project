@@ -146,6 +146,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/sessions/{session_id}/ask/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ask Stream
+         * @description The same answer as /ask, with its progress as it happens, one JSON object per line:
+         *     {"type": "step", "step": "plan", "state": "start" | "done", "ms": ...} for each step,
+         *     {"type": "token", "text": "..."} as the model writes (the text is checked only at the
+         *     end: it may be replaced), then {"type": "answer", "answer": {...}} (the checked
+         *     answer, as /ask returns it) or {"type": "error", "message": "..."}.
+         */
+        post: operations["ask_stream_sessions__session_id__ask_stream_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/sessions/{session_id}/reset": {
         parameters: {
             query?: never;
@@ -211,7 +235,7 @@ export interface components {
              * Status
              * @enum {string}
              */
-            status: "answered" | "clarify" | "rejected" | "unsupported" | "empty" | "model_unavailable" | "query_failed";
+            status: "answered" | "clarify" | "rejected" | "unsupported" | "empty" | "model_unavailable" | "query_failed" | "general";
             /** Step Ms */
             step_ms: {
                 [key: string]: number;
@@ -315,7 +339,7 @@ export interface components {
          * Intent
          * @enum {string}
          */
-        Intent: "trend" | "compare" | "rank" | "breakdown" | "lookup" | "clarify" | "unsupported";
+        Intent: "trend" | "compare" | "rank" | "breakdown" | "lookup" | "clarify" | "unsupported" | "general";
         /** MetricInfo */
         MetricInfo: {
             /** Base Table */
@@ -779,6 +803,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Answer"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ask_stream_sessions__session_id__ask_stream_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string;
+            };
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AskBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/x-ndjson": unknown;
                 };
             };
             /** @description Validation Error */

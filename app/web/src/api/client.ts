@@ -37,7 +37,48 @@ async function call<T>(method: "GET" | "POST", path: string, body?: unknown): Pr
   return response.json() as Promise<T>;
 }
 
+// Live progress of an answer (POST .../ask/stream, one JSON object per line).
+export type StreamEvent =
+  | { type: "step"; step: string; state: "start" | "done"; ms?: number }
+  | { type: "token"; text: string }
+  | { type: "answer"; answer: Answer }
+  | { type: "error"; message: string };
+
+async function askStream(sessionId: string, question: string, onEvent: (event: StreamEvent) => void): Promise<Answer> {
+  const response = await fetch(`/api/sessions/${sessionId}/ask/stream`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ question }),
+  });
+  if (!response.ok || !response.body) {
+    const payload = await response.json().catch(() => ({}));
+    const detail = payload?.detail;
+    throw new ApiError(response.status, detail?.reasons ?? (typeof detail === "string" ? [detail] : [`HTTP ${response.status}`]));
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let answer: Answer | undefined;
+  for (;;) {
+    const { value, done } = await reader.read();
+    buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      const event = JSON.parse(line) as StreamEvent;
+      onEvent(event);
+      if (event.type === "answer") answer = event.answer;
+      if (event.type === "error") throw new ApiError(500, [event.message]);
+    }
+    if (done) break;
+  }
+  if (!answer) throw new ApiError(500, ["the answer stream ended without an answer"]);
+  return answer;
+}
+
 export const api = {
+  askStream,
   health: () => call<Health>("GET", "/health"),
   catalog: () => call<CatalogView>("GET", "/catalog"),
   newSession: () =>

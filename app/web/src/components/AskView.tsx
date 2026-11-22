@@ -2,12 +2,12 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { AnimatePresence, LayoutGroup, motion, useReducedMotion } from "framer-motion";
 import { ArrowUp, BookOpen, CircleDollarSign, MapPinned, RotateCcw, ShieldAlert, TrendingUp, X } from "lucide-react";
 import { type KeyboardEvent, type ReactNode, type RefObject, useEffect, useRef, useState } from "react";
-import { type Answer, ApiError, api, type CatalogView, type Health } from "../api/client";
+import { type Answer, ApiError, api, type CatalogView, type Health, type StreamEvent } from "../api/client";
 import AnswerCard from "./AnswerCard";
 import ErrorBoundary from "./ErrorBoundary";
 import HeroScene from "./HeroScene";
 import { ease, rise, spring, stagger } from "./motion";
-import ThinkingCard from "./ThinkingCard";
+import ThinkingCard, { type Progress } from "./ThinkingCard";
 
 const SUGGESTIONS: { icon: ReactNode; tone: string; topic: string; question: string }[] = [
   {
@@ -26,7 +26,7 @@ const SUGGESTIONS: { icon: ReactNode; tone: string; topic: string; question: str
   { icon: <ShieldAlert size={17} />, tone: "bg-bad/10 text-bad-ink", topic: "Safeguards", question: "How much do drivers earn per shift?" },
 ];
 
-type Turn = { id: number; question: string; answer?: Answer; error?: string };
+type Turn = { id: number; question: string; answer?: Answer; error?: string; progress?: Progress };
 type Chip = { id: string; kind: "measure" | "filter" | "period"; text: string; phrase: string };
 
 function monthWords(month: string): string {
@@ -113,8 +113,26 @@ export default function AskView({ catalog, health, injected, onOpenMeasures }: P
     input.current?.focus();
   }, [injected]);
 
+  // Live progress: steps and text as the API reports them, on the turn being answered.
+  const onEvent = (event: StreamEvent) => {
+    if (event.type !== "step" && event.type !== "token") return;
+    setTurns((t) =>
+      t.map((turn, i) => {
+        if (i !== t.length - 1) return turn;
+        const p: Progress = turn.progress ?? { started: [], done: [], text: "" };
+        if (event.type === "token") return { ...turn, progress: { ...p, text: p.text + event.text } };
+        return {
+          ...turn,
+          progress:
+            event.state === "start"
+              ? { ...p, started: [...p.started, event.step] }
+              : { ...p, done: [...p.done, event.step] },
+        };
+      }),
+    );
+  };
   const ask = useMutation({
-    mutationFn: (q: string) => api.ask(sessionId!, q),
+    mutationFn: (q: string) => api.askStream(sessionId!, q, onEvent),
     onSuccess: (answer) => setTurns((t) => t.map((turn, i) => (i === t.length - 1 ? { ...turn, answer } : turn))),
     onError: (error) =>
       setTurns((t) =>
@@ -305,7 +323,7 @@ export default function AskView({ catalog, health, injected, onOpenMeasures }: P
                     </motion.div>
                     {turn.answer && (
                       <ErrorBoundary label="answer" compact>
-                        <AnswerCard answer={turn.answer} units={units} labels={labels} onFollowUp={submit} />
+                        <AnswerCard answer={turn.answer} units={units} labels={labels} onFollowUp={submit} streamed={Boolean(turn.progress?.text)} />
                       </ErrorBoundary>
                     )}
                     {turn.error && (
@@ -313,7 +331,7 @@ export default function AskView({ catalog, health, injected, onOpenMeasures }: P
                         The question could not be answered: {turn.error}
                       </div>
                     )}
-                    {!turn.answer && !turn.error && <ThinkingCard />}
+                    {!turn.answer && !turn.error && <ThinkingCard progress={turn.progress} />}
                   </section>
                 ))}
               </div>

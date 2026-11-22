@@ -174,6 +174,22 @@
   }
 }
 
+/* Writing caret of a streamed answer. */
+.caret {
+  display: inline-block;
+  width: 0.5em;
+  height: 1.05em;
+  margin-left: 2px;
+  vertical-align: -0.15em;
+  border-radius: 2px;
+  background: rgb(var(--accent));
+}
+@media (prefers-reduced-motion: no-preference) {
+  .caret {
+    animation: blink 1s steps(2, start) infinite;
+  }
+}
+
 /* Hero scene: animations attached only when the visitor accepts motion. */
 @media (prefers-reduced-motion: no-preference) {
   .hero-trip {

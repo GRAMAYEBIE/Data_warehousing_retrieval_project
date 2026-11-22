@@ -1,10 +1,11 @@
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { ArrowRight, Check, ChevronDown, CircleHelp, Copy, Info, ShieldAlert } from "lucide-react";
+import { ArrowRight, Check, ChevronDown, CircleHelp, Copy, Info, MessageCircle, ShieldAlert } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import type { Answer } from "../api/client";
 import { filterText, formatValue, seconds } from "../lib/format";
 import DataTable from "./DataTable";
-import { CountUp, ease, WordReveal } from "./motion";
+import Markdown from "./Markdown";
+import { CountUp, ease } from "./motion";
 import ResultChart from "./ResultChart";
 
 // Answers arrive in sequence: status, headline figure, chart, text, actions.
@@ -16,6 +17,7 @@ type Props = {
   units: Record<string, string>;
   labels: Record<string, string>;
   onFollowUp: (question: string) => void;
+  streamed?: boolean; // the text was already shown as it was written
 };
 
 // Valid questions offered when a request cannot be answered as asked.
@@ -48,7 +50,7 @@ function monthsText(period?: string | null): string {
   return months.length === 1 ? name(months[0]) : `${name(months[0])} – ${name(months[months.length - 1])}`;
 }
 
-export default function AnswerCard({ answer, units, labels, onFollowUp }: Props) {
+export default function AnswerCard({ answer, units, labels, onFollowUp, streamed = false }: Props) {
   const reduce = useReducedMotion();
   const [open, setOpen] = useState(false);
   const [detail, setDetail] = useState<"data" | "sql" | "timing" | null>(null);
@@ -83,6 +85,45 @@ export default function AnswerCard({ answer, units, labels, onFollowUp }: Props)
       /* clipboard unavailable */
     }
   };
+
+  if (answer.status === "general") {
+    // Questions the answer suggests ("What was total revenue last month?") become buttons.
+    const suggested = Array.from(new Set(Array.from(answer.narrative.matchAll(/["“]([^"”\n]{8,140}\?)["”]/g), (m) => m[1]))).slice(0, 3);
+    return (
+      <motion.article
+        initial={reduce || streamed ? false : { opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.3, ease }}
+        className="space-y-3"
+        aria-live="polite"
+      >
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <span className="chip border-primary/25 bg-primary/10 text-primary-strong" title="Written by the model from general knowledge and the platform documentation">
+            <MessageCircle size={12} aria-hidden="true" /> General answer · not computed from the data
+          </span>
+          <span className="num ml-auto text-ink-3">{seconds(answer.duration_ms)}</span>
+        </div>
+        <Markdown text={answer.narrative} className="text-base leading-7 text-ink" />
+        {answer.narrative_check === "replaced" && (
+          <p className="flex gap-2 text-xs text-ink-3">
+            <Info size={14} className="mt-0.5 shrink-0" aria-hidden="true" />
+            Sentences stating figures about the taxi data were removed: such figures come only from governed queries.
+          </p>
+        )}
+        <div className="flex flex-wrap items-center gap-2">
+          {(suggested.length ? suggested : answer.suggested_followup ? [answer.suggested_followup] : []).map((q) => (
+            <button key={q} className="btn-outline min-h-8 justify-start px-3 py-1.5 text-left text-sm" onClick={() => onFollowUp(q)}>
+              {q}
+              <ArrowRight size={13} className="text-ink-3" aria-hidden="true" />
+            </button>
+          ))}
+          <button className="btn-ghost h-8 px-2.5 text-sm" onClick={copy} aria-label="Copy the answer">
+            {copied ? <Check size={14} aria-hidden="true" /> : <Copy size={14} aria-hidden="true" />} {copied ? "Copied" : "Copy"}
+          </button>
+        </div>
+      </motion.article>
+    );
+  }
 
   if (!answered) {
     const refusal = answer.status !== "clarify";
@@ -173,7 +214,7 @@ export default function AnswerCard({ answer, units, labels, onFollowUp }: Props)
         )}
 
         <motion.div variants={STEP}>
-          <WordReveal text={answer.narrative} className="text-base leading-7 text-ink" />
+          <Markdown text={answer.narrative} className="text-base leading-7 text-ink" />
         </motion.div>
 
         {lowQuality && (
