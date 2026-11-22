@@ -30,7 +30,7 @@ export default function ThinkingCard() {
           return (
             <li key={step.name} className="flex flex-1 items-center gap-2">
               <span
-                className={`relative grid h-6 w-6 shrink-0 place-items-center rounded-full text-[11px] font-semibold transition-colors duration-300 ${
+                className={`relative grid h-6 w-6 shrink-0 place-items-center rounded-full text-xs font-semibold transition-colors duration-300 ${
                   state === "done"
                     ? "bg-good text-white"
                     : state === "active"

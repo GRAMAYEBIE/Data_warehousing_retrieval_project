@@ -46,7 +46,7 @@ export default function Sidebar({ page, onPage, health, catalog }: Props) {
       <div className="flex h-16 items-center gap-2.5 px-5">
         <BrandMark />
         <div className="leading-tight">
-          <div className="font-display text-[15px] font-semibold">MetroMove Insight</div>
+          <div className="font-display text-base font-semibold">MetroMove Insight</div>
           <div className="text-xs text-ink-3">NYC taxi analytics</div>
         </div>
       </div>
@@ -106,7 +106,7 @@ function Row({ label, value, mono }: { label: string; value: string; mono?: bool
   return (
     <div className="flex justify-between gap-3">
       <dt className="text-ink-3">{label}</dt>
-      <dd className={`num truncate font-medium text-ink ${mono ? "font-mono text-[11px]" : ""}`}>{value}</dd>
+      <dd className={`num truncate font-medium text-ink ${mono ? "font-mono text-xs" : ""}`}>{value}</dd>
     </div>
   );
 }

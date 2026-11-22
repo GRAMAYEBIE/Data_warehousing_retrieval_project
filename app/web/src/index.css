@@ -89,11 +89,11 @@
 
 @layer base {
   html {
-    font-size: 16px;
+    font-size: 17px;
     -webkit-text-size-adjust: 100%;
   }
   body {
-    @apply bg-page font-sans text-[15px] leading-6 text-ink antialiased;
+    @apply bg-page font-sans text-base leading-7 text-ink antialiased;
     font-feature-settings: "cv11", "ss01";
   }
   h1,
@@ -144,10 +144,10 @@
     @apply inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium;
   }
   .pill {
-    @apply inline-flex items-center rounded-full bg-tint px-2 py-px text-[11px] font-medium text-ink-2;
+    @apply inline-flex items-center rounded-full bg-tint px-2 py-0.5 text-xs font-medium text-ink-2;
   }
   .label {
-    @apply text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-3;
+    @apply text-xs font-semibold uppercase tracking-[0.07em] text-ink-3;
   }
   .num {
     font-variant-numeric: tabular-nums;

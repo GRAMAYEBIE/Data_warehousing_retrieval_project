@@ -41,7 +41,7 @@ export default function ReportBuilder({ catalog }: { catalog?: CatalogView }) {
   return (
     <div className="mx-auto w-full max-w-4xl space-y-6 px-4 py-8 sm:px-6">
       <div>
-        <h2 className="text-[22px] font-semibold tracking-tight">Build a dashboard from a sentence</h2>
+        <h2 className="text-[26px] font-semibold tracking-tight">Build a dashboard from a sentence</h2>
         <p className="mt-1.5 max-w-2xl text-sm leading-6 text-ink-2">
           Each chart is planned with governed measures only and previewed on the published data. A draft dashboard is
           created in Superset; it goes live only after your explicit confirmation.
@@ -55,7 +55,7 @@ export default function ReportBuilder({ catalog }: { catalog?: CatalogView }) {
         </label>
         <textarea
           id="request"
-          className="mt-2 h-28 w-full resize-none rounded-input border border-line bg-page/60 p-3 text-[15px] leading-6 outline-none transition focus:border-line-strong focus:bg-surface focus:shadow-focus"
+          className="mt-2 h-28 w-full resize-none rounded-input border border-line bg-page/60 p-3 text-base leading-6 outline-none transition focus:border-line-strong focus:bg-surface focus:shadow-focus"
           value={request}
           maxLength={600}
           onChange={(e) => setRequest(e.target.value)}
@@ -107,7 +107,7 @@ export default function ReportBuilder({ catalog }: { catalog?: CatalogView }) {
           >
             <header className="flex flex-wrap items-center gap-3 border-b border-line px-5 py-3.5">
               <div className="min-w-0 flex-1">
-                <h3 className="truncate text-[15px] font-semibold">{report.dashboard_title}</h3>
+                <h3 className="truncate text-base font-semibold">{report.dashboard_title}</h3>
                 {spec?.explanation && <p className="mt-0.5 text-xs text-ink-2">{spec.explanation}</p>}
               </div>
               <span className={`chip ${report.status === "published" ? "border-good/30 bg-good/10 text-good-ink" : "border-accent/40 bg-accent/15 text-ink"}`}>
@@ -124,7 +124,7 @@ export default function ReportBuilder({ catalog }: { catalog?: CatalogView }) {
                 <section key={p.title} className="rounded-input border border-line p-4">
                   <div className="mb-3 flex items-baseline justify-between gap-2">
                     <h4 className="text-sm font-medium">{p.title}</h4>
-                    <span className="text-[11px] text-ink-3">
+                    <span className="text-xs text-ink-3">
                       {p.chart} · {p.row_count} rows
                     </span>
                   </div>
@@ -134,7 +134,7 @@ export default function ReportBuilder({ catalog }: { catalog?: CatalogView }) {
                     <summary className="cursor-pointer text-xs font-medium text-ink-2 hover:text-ink">Data and query</summary>
                     <div className="mt-2 space-y-2">
                       <DataTable columns={p.columns} rows={p.rows} units={units} max={20} />
-                      <pre className="overflow-auto rounded-lg bg-tint p-3 font-mono text-[11px] text-ink-2">{p.sql}</pre>
+                      <pre className="overflow-auto rounded-lg bg-tint p-3 font-mono text-xs text-ink-2">{p.sql}</pre>
                     </div>
                   </details>
                 </section>
@@ -145,7 +145,7 @@ export default function ReportBuilder({ catalog }: { catalog?: CatalogView }) {
               <summary className="cursor-pointer text-xs font-medium text-ink-2">
                 Specification (validated plan of every chart)
               </summary>
-              <pre className="mt-2 overflow-auto font-mono text-[11px] text-ink-2">{JSON.stringify(report.specification, null, 2)}</pre>
+              <pre className="mt-2 overflow-auto font-mono text-xs text-ink-2">{JSON.stringify(report.specification, null, 2)}</pre>
             </details>
 
             <div className="border-t border-line bg-page/50 px-5 py-4">

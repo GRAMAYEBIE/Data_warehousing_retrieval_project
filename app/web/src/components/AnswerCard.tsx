@@ -7,6 +7,10 @@ import DataTable from "./DataTable";
 import { CountUp, ease, WordReveal } from "./motion";
 import ResultChart from "./ResultChart";
 
+// Answers arrive in sequence: status, headline figure, chart, text, actions.
+const SEQUENCE = { hidden: {}, show: { transition: { staggerChildren: 0.12, delayChildren: 0.05 } } };
+const STEP = { hidden: { opacity: 0, y: 10 }, show: { opacity: 1, y: 0, transition: { duration: 0.38, ease } } };
+
 type Props = {
   answer: Answer;
   units: Record<string, string>;
@@ -94,7 +98,7 @@ export default function AnswerCard({ answer, units, labels, onFollowUp }: Props)
           {refusal ? <ShieldAlert size={16} aria-hidden="true" /> : <CircleHelp size={16} aria-hidden="true" />}
           {REFUSAL_TITLE[answer.status] ?? "Not answered"}
         </div>
-        <p className="mt-2 text-[15px] leading-7 text-ink">{answer.narrative}</p>
+        <p className="mt-2 text-base leading-7 text-ink">{answer.narrative}</p>
         {notes.length > 0 && (
           <ul className="mt-2 space-y-1 text-sm text-ink-2">
             {notes.map((r) => (
@@ -106,7 +110,7 @@ export default function AnswerCard({ answer, units, labels, onFollowUp }: Props)
           <div className="text-xs font-medium text-ink-3">You can ask instead</div>
           <div className="mt-2 flex flex-wrap gap-2">
             {(ALTERNATIVES[answer.status] ?? ALTERNATIVES.rejected).map((q) => (
-              <button key={q} className="btn-outline h-8 px-3 text-[13px]" onClick={() => onFollowUp(q)}>
+              <button key={q} className="btn-outline h-8 px-3 text-sm" onClick={() => onFollowUp(q)}>
                 {q} <ArrowRight size={13} className="text-ink-3" aria-hidden="true" />
               </button>
             ))}
@@ -124,8 +128,8 @@ export default function AnswerCard({ answer, units, labels, onFollowUp }: Props)
       className="card overflow-hidden"
       aria-live="polite"
     >
-      <div className="space-y-4 p-5">
-        <div className="flex flex-wrap items-center gap-2 text-xs">
+      <motion.div className="space-y-4 p-5" variants={reduce ? undefined : SEQUENCE} initial="hidden" animate="show">
+        <motion.div variants={STEP} className="flex flex-wrap items-center gap-2 text-xs">
           {verified ? (
             <span className="chip border-good/30 bg-good/10 text-good-ink">
               <Check size={12} strokeWidth={3} aria-hidden="true" /> Numbers verified
@@ -147,28 +151,30 @@ export default function AnswerCard({ answer, units, labels, onFollowUp }: Props)
             </span>
           ))}
           <span className="num ml-auto text-ink-3">{seconds(answer.duration_ms)}</span>
-        </div>
+        </motion.div>
 
         {headline.length > 0 && (
-          <div className={`grid gap-3 ${headline.length > 1 ? "sm:grid-cols-2" : ""}`}>
+          <motion.div variants={STEP} className={`grid gap-3 ${headline.length > 1 ? "sm:grid-cols-2" : ""}`}>
             {headline.map((m) => (
               <Headline key={m} label={label(m)} unit={units[m] ?? ""} metric={m} row={row} compared={compared} />
             ))}
-          </div>
+          </motion.div>
         )}
 
         {answer.rows.length > 1 && (
-          <div className="rounded-input border border-line p-3">
+          <motion.div variants={STEP} className="rounded-input border border-line p-3">
             <ResultChart columns={answer.columns} rows={answer.rows} metrics={metrics} units={units} labels={labels} />
             {plan?.grain === "week" && answer.columns.includes("period") && (
               <p className="mt-2 text-xs text-ink-3">
                 Weeks start on Monday; the first and last weeks count only the days inside the period.
               </p>
             )}
-          </div>
+          </motion.div>
         )}
 
-        <WordReveal text={answer.narrative} className="text-[15px] leading-7 text-ink" />
+        <motion.div variants={STEP}>
+          <WordReveal text={answer.narrative} className="text-base leading-7 text-ink" />
+        </motion.div>
 
         {lowQuality && (
           <div className="flex gap-2 rounded-input border border-bad/30 border-l-4 border-l-bad bg-surface px-3 py-2 text-sm text-ink">
@@ -185,18 +191,18 @@ export default function AnswerCard({ answer, units, labels, onFollowUp }: Props)
           </p>
         )}
 
-        <div className="flex flex-wrap items-center gap-2">
+        <motion.div variants={STEP} className="flex flex-wrap items-center gap-2">
           {answer.suggested_followup && (
-            <button className="btn-outline min-h-8 justify-start px-3 py-1.5 text-left text-[13px]" onClick={() => onFollowUp(answer.suggested_followup!)}>
+            <button className="btn-outline min-h-8 justify-start px-3 py-1.5 text-left text-sm" onClick={() => onFollowUp(answer.suggested_followup!)}>
               {answer.suggested_followup}
               <ArrowRight size={13} className="text-ink-3" aria-hidden="true" />
             </button>
           )}
-          <button className="btn-ghost h-8 px-2.5 text-[13px]" onClick={copy} aria-label="Copy the answer">
+          <button className="btn-ghost h-8 px-2.5 text-sm" onClick={copy} aria-label="Copy the answer">
             {copied ? <Check size={14} aria-hidden="true" /> : <Copy size={14} aria-hidden="true" />} {copied ? "Copied" : "Copy"}
           </button>
-        </div>
-      </div>
+        </motion.div>
+      </motion.div>
 
       <div className="border-t border-line bg-page/50">
         <button
@@ -222,7 +228,7 @@ export default function AnswerCard({ answer, units, labels, onFollowUp }: Props)
                     {prov.metrics.map((m) => (
                       <Item key={m.name} term={m.label}>
                         <span className="text-ink">{m.definition}</span>
-                        <code className="mt-1 block break-all rounded-md bg-tint px-2 py-1 font-mono text-[12px] text-ink-2">{m.sql_expression}</code>
+                        <code className="mt-1 block break-all rounded-md bg-tint px-2 py-1 font-mono text-xs text-ink-2">{m.sql_expression}</code>
                       </Item>
                     ))}
                     <Item term="Filters">
@@ -236,10 +242,10 @@ export default function AnswerCard({ answer, units, labels, onFollowUp }: Props)
                       <span className="num">{prov.published_at.slice(0, 16).replace("T", " ")} UTC</span>
                     </Item>
                     <Item term="Publication">
-                      <code className="font-mono text-[12px]">{prov.published_run}</code>
+                      <code className="font-mono text-xs">{prov.published_run}</code>
                     </Item>
                     <Item term="Query template">
-                      <code className="font-mono text-[12px]">
+                      <code className="font-mono text-xs">
                         {plan?.intent ?? "lookup"} · {prov.data_layer}
                       </code>
                     </Item>
@@ -277,7 +283,7 @@ export default function AnswerCard({ answer, units, labels, onFollowUp }: Props)
                 </div>
                 {detail === "data" && <DataTable columns={answer.columns} rows={answer.rows} units={units} />}
                 {detail === "sql" && prov && (
-                  <pre className="overflow-auto rounded-input bg-tint p-3 font-mono text-[12px] leading-relaxed text-ink-2">
+                  <pre className="overflow-auto rounded-input bg-tint p-3 font-mono text-xs leading-relaxed text-ink-2">
                     {prov.rendered_sql}
                   </pre>
                 )}
@@ -323,7 +329,7 @@ function Headline({
   return (
     <div className="rounded-input border border-line bg-page/40 px-4 py-3.5">
       <div className="text-xs font-medium text-ink-3">{label}</div>
-      <div className="num mt-1 font-display text-[30px] font-semibold leading-tight text-ink">
+      <div className="num mt-1 font-display text-[34px] font-semibold leading-tight text-ink">
         {Number.isFinite(value) ? <CountUp value={value} format={(n) => formatValue(n, unit)} /> : formatValue(current, unit)}
       </div>
       {change !== null && (
@@ -360,7 +366,7 @@ function StepBars({ steps, total, traceId }: { steps: Record<string, number>; to
           <span className="num text-right text-ink-3">{seconds(ms)}</span>
         </div>
       ))}
-      <p className="pt-1 text-[11px] text-ink-3">
+      <p className="pt-1 text-xs text-ink-3">
         Amber: model steps. Blue: code and database.
         {traceId && (
           <>

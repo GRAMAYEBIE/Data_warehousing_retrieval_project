@@ -20,7 +20,7 @@ export function MeasuresList({ catalog, onAsk }: Props) {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="px-4 pb-3 pt-4">
-        <h2 className="font-display text-[15px] font-semibold">Governed measures</h2>
+        <h2 className="font-display text-base font-semibold">Governed measures</h2>
         <p className="mt-0.5 text-xs text-ink-3">One definition each, shared with the dashboards.</p>
         <label className="mt-3 flex items-center gap-2 rounded-input border border-line bg-surface px-3 py-2 focus-within:ring-2 focus-within:ring-primary">
           <Search size={14} className="text-ink-3" aria-hidden="true" />
@@ -142,14 +142,14 @@ function MeasureDetail({
               </dd>
               <dt className="text-ink-3">Formula</dt>
               <dd>
-                <code className="block break-all rounded-md bg-tint px-2 py-1.5 font-mono text-[12px] text-ink">{measure.formula}</code>
+                <code className="block break-all rounded-md bg-tint px-2 py-1.5 font-mono text-xs text-ink">{measure.formula}</code>
               </dd>
               <dt className="text-ink-3">Filters</dt>
               <dd className="text-ink-2">{measure.filters}</dd>
               <dt className="text-ink-3">Grains</dt>
               <dd className="text-ink-2">{measure.grains}</dd>
               <dt className="text-ink-3">Source</dt>
-              <dd className="font-mono text-[12px] text-ink-2">{measure.source}</dd>
+              <dd className="font-mono text-xs text-ink-2">{measure.source}</dd>
               <dt className="text-ink-3">Owner</dt>
               <dd className="text-ink-2">{DATA_OWNER}</dd>
             </dl>

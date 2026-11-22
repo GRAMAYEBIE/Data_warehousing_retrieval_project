@@ -216,10 +216,10 @@ export default function AskView({ catalog, health, injected, onOpenMeasures }: P
                     exit={{ opacity: 0 }}
                     transition={{ duration: 0.2 }}
                   >
-                    <h1 className="text-[26px] font-semibold leading-tight sm:text-[32px]">
+                    <h1 className="text-[28px] font-semibold leading-tight sm:text-[38px]">
                       Ask New York&apos;s taxi data anything
                     </h1>
-                    <p className="mt-2 max-w-md text-[15px] text-ink-2">
+                    <p className="mt-2 max-w-md text-base text-ink-2">
                       Plain-English questions, answered with governed measures and their source.
                     </p>
                     <div className="mt-3.5 flex flex-wrap gap-2">
@@ -243,7 +243,7 @@ export default function AskView({ catalog, health, injected, onOpenMeasures }: P
                     exit={{ opacity: 0 }}
                     transition={{ duration: 0.2 }}
                   >
-                    <h1 className="truncate text-[15px] font-semibold">Ask New York&apos;s taxi data</h1>
+                    <h1 className="truncate text-base font-semibold">Ask New York&apos;s taxi data</h1>
                     {months.length > 0 && (
                       <span className="chip num hidden border-line bg-surface/90 text-ink-2 sm:inline-flex">
                         {months[0]} → {months[months.length - 1]}
@@ -299,7 +299,7 @@ export default function AskView({ catalog, health, injected, onOpenMeasures }: P
                       transition={{ duration: 0.25, ease }}
                       className="flex justify-end"
                     >
-                      <div className="max-w-[85%] rounded-card rounded-br-[4px] bg-primary/10 px-4 py-2.5 text-[15px] leading-6 text-ink">
+                      <div className="max-w-[85%] rounded-card rounded-br-[4px] bg-primary/10 px-4 py-2.5 text-base leading-6 text-ink">
                         {turn.question}
                       </div>
                     </motion.div>
@@ -449,7 +449,7 @@ function Composer({
         placeholder={disabled ? "Connecting to the assistant…" : placeholder}
         aria-label="Your question"
         className={`block flex-1 resize-none bg-transparent px-3 leading-6 text-ink outline-none placeholder:text-ink-3 focus-visible:ring-0 focus-visible:ring-offset-0 ${
-          large ? "py-3 text-base" : "py-2 text-[15px]"
+          large ? "py-3 text-base" : "py-2 text-base"
         }`}
       />
       <motion.button
