@@ -3,10 +3,15 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="Governed natural-language analytics on NYC Yellow Taxi trips." />
-    <title>Taxi Insight Assistant</title>
+    <meta name="description" content="Governed analytics on NYC Yellow Taxi trips: ask questions, build reports." />
+    <meta name="theme-color" content="#f7f8fa" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0b0d11" media="(prefers-color-scheme: dark)" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>MetroMove Insight</title>
+    <!-- Applies the visitor's saved theme before the first paint (no light flash in dark). -->
+    <script src="/theme-init.js"></script>
   </head>
-  <body class="bg-slate-50 text-slate-900 antialiased">
+  <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
