@@ -11,4 +11,6 @@ RUN npm run build
 FROM nginx:1.28.0-alpine
 COPY nginx/default.conf.template /etc/nginx/templates/default.conf.template
 COPY --from=build /web/dist /usr/share/nginx/html
-HEALTHCHECK --interval=30s --timeout=5s --retries=5 CMD wget -qO- http://localhost/ >/dev/null || exit 1
+# 127.0.0.1, not localhost: in this image localhost can resolve to ::1 first, where nginx
+# does not listen (observed on macOS: the container was reported unhealthy while serving).
+HEALTHCHECK --interval=30s --timeout=5s --retries=5 CMD wget -qO- http://127.0.0.1/ >/dev/null || exit 1

@@ -143,6 +143,10 @@ services:
     # Let PostgreSQL finish its shutdown checkpoint after large loads; the default
     # 10 s leads to a kill and a long crash recovery on the next start.
     stop_grace_period: 2m
+    # PostgreSQL keeps dynamic shared memory (hash tables and sorts that outgrow work_mem,
+    # parallel index builds) in /dev/shm; Docker gives a container 64 MB. Observed on the
+    # Mac mini: int_trips_flagged failed with "could not resize shared memory segment".
+    shm_size: 1g
     restart: unless-stopped
 
   rustfs:
@@ -561,10 +565,18 @@ services:
       - /etc/alloy/config.alloy
       - --server.http.listen-addr=0.0.0.0:12345
       - --storage.path=/var/lib/alloy/data
+      # No anonymous usage report to grafana.com: the platform sends nothing outside.
+      - --disable-reporting
+    environment:
+      # Observed on a 10-core Mac: at 128 MB the Go garbage collector ran continuously on
+      # every core (about 970 % CPU, 7 restarts). A memory target below the limit and two
+      # threads keep the log collector a small, steady load whatever the host.
+      GOMEMLIMIT: 200MiB
+      GOMAXPROCS: "2"
     volumes:
       - ./infra/observability/alloy:/etc/alloy:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
-    mem_limit: 128m
+    mem_limit: 256m
     depends_on: [loki]
     restart: unless-stopped
 
