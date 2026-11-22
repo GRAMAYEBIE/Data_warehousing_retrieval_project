@@ -29,3 +29,8 @@ def test_the_answer_contract_carries_provenance_and_observability_fields():
     answer = app.openapi()["components"]["schemas"]["Answer"]["properties"]
     for field in ("provenance", "active_filters", "reasons", "trace_id", "step_ms", "llm_usage"):
         assert field in answer
+
+
+def test_the_streaming_endpoint_is_documented_as_ndjson():
+    spec = app.openapi()["paths"]["/sessions/{session_id}/ask/stream"]["post"]
+    assert "application/x-ndjson" in spec["responses"]["200"]["content"]

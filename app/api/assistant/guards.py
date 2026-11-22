@@ -94,6 +94,39 @@ def unsupported_numbers(
     return found
 
 
+DATA_WORDS = re.compile(
+    r"\b(trips?|rides?|revenue|fares?|tips?|passengers?|taxis?|cabs?|pickups?|dropoffs?|"
+    r"surcharges?|fees?|miles?|distance|duration)\b",
+    re.IGNORECASE,
+)
+SENTENCE = re.compile(r"(?<=[.!?])\s+|\n+")
+
+
+def scrub_data_figures(text: str) -> tuple[str, int]:
+    """A conversational answer may not state figures of the taxi data: only governed
+    queries produce them. A sentence that pairs a number (other than a year, a day or a
+    small count) with a data word is removed. Returns the text and how many sentences were
+    removed."""
+    kept, removed = [], 0
+    for line in text.split("\n"):
+        sentences = [s for s in SENTENCE.split(line) if s]
+        out = []
+        for sentence in sentences:
+            numbers = [
+                n
+                for n in _numbers_in(sentence)
+                if not (abs(n) < 32 and float(n).is_integer())
+                and not (1990 <= n <= 2100 and float(n).is_integer())
+            ]
+            if numbers and DATA_WORDS.search(sentence):
+                removed += 1
+                continue
+            out.append(sentence)
+        if out or not sentences:
+            kept.append(" ".join(out))
+    return "\n".join(kept).strip(), removed
+
+
 HIGH_WORDS = ("highest", "most", "largest", "biggest", "top", "leading", "led ", "greatest")
 LOW_WORDS = ("lowest", "least", "smallest", "fewest", "bottom", "weakest")
 

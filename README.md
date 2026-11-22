@@ -97,7 +97,7 @@ health. Each step runs alone (`env`, `core`, `load`, `bi`, `ai`) and can be run 
 | Docker | Docker Desktop with the WSL 2 backend | Docker Desktop |
 | Memory for Docker | 4 GB on an 8 GB laptop, with WSL swap (see [Local resources](#local-resources)) | 10 GB on a 16 GB machine (Settings → Resources) |
 | Python command | `python scripts/bootstrap.py ...` | `python3 scripts/bootstrap.py ...` |
-| GPU for the model | `--gpu` with an NVIDIA GPU and the NVIDIA Container Toolkit | no `--gpu`: Docker on macOS cannot use the Apple GPU, the model runs on the CPU |
+| GPU for the model | `--gpu` with an NVIDIA GPU and the NVIDIA Container Toolkit | Docker on macOS cannot use the Apple GPU: run Ollama on the host (below) |
 | Shell for the `make` targets | Git Bash or WSL | Terminal (zsh) |
 
 The images are multi-architecture or built locally, so the same commands run on `x86_64`
@@ -108,6 +108,26 @@ and on `arm64`. Measured on one month each (2025-04, 4.0 million trips, on the l
 |---|---|---|
 | Bronze load | 6 min | 0.3 min |
 | Silver quality flags (`int_trips_flagged`) | 53 min | 0.8 min |
+
+**The model on the Apple GPU (macOS).** Ollama runs on the host, the API reaches it through
+`host.docker.internal`; it listens on the Mac only (127.0.0.1), nothing is opened on the
+network. Measured on the 17 data cases of the evaluation pack (all passed in each run):
+
+| Model | Ollama in Docker (CPU) | Ollama on the host (Metal GPU) |
+|---|---|---|
+| qwen2.5:3b | 8.8 s median | 3.7 s median |
+| qwen2.5:7b | 19.6 s median | 8.3 s median |
+
+```bash
+# Official macOS build of the same Ollama version, in the user's home (no administrator)
+curl -fsSLO https://github.com/ollama/ollama/releases/download/v0.40.12/ollama-darwin.tgz
+mkdir -p ~/ollama-native && tar -xzf ollama-darwin.tgz -C ~/ollama-native
+OLLAMA_HOST=127.0.0.1:11435 ~/ollama-native/ollama serve &      # or a launchd agent
+OLLAMA_HOST=127.0.0.1:11435 ~/ollama-native/ollama pull qwen2.5:7b
+# .env
+OLLAMA_URL=http://host.docker.internal:11435
+OLLAMA_MODEL=qwen2.5:7b
+```
 
 During a long load on macOS, keep the machine awake (`caffeinate -ims` in a terminal, or
 System Settings → Energy → "Prevent automatic sleeping when the display is off"). On

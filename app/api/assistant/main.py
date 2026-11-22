@@ -5,12 +5,15 @@ Every endpoint except /health requires `Authorization: Bearer <API_TOKEN>`.
 
 from __future__ import annotations
 
+import json
 import os
+import queue
 import threading
 from contextlib import asynccontextmanager
 from functools import lru_cache
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Response
+from fastapi.responses import StreamingResponse
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from pydantic import BaseModel, Field
 
@@ -131,6 +134,48 @@ def new_session() -> SessionCreated:
 @app.post("/sessions/{session_id}/ask", dependencies=[Depends(authorised)])
 def ask(session_id: str, body: AskBody) -> Answer:
     return get_assistant().ask(body.question, session_id, body.prompt_variant)
+
+
+@app.post(
+    "/sessions/{session_id}/ask/stream",
+    dependencies=[Depends(authorised)],
+    response_class=StreamingResponse,
+    responses={200: {"content": {"application/x-ndjson": {}}}},
+)
+def ask_stream(session_id: str, body: AskBody) -> StreamingResponse:
+    """The same answer as /ask, with its progress as it happens, one JSON object per line:
+    {"type": "step", "step": "plan", "state": "start" | "done", "ms": ...} for each step,
+    {"type": "token", "text": "..."} as the model writes (the text is checked only at the
+    end: it may be replaced), then {"type": "answer", "answer": {...}} (the checked
+    answer, as /ask returns it) or {"type": "error", "message": "..."}."""
+    assistant = get_assistant()
+    events: queue.Queue = queue.Queue()
+    done = object()
+
+    def work() -> None:
+        token = telemetry.set_emitter(events.put)
+        try:
+            answer = assistant.ask(body.question, session_id, body.prompt_variant)
+            events.put({"type": "answer", "answer": answer.model_dump(mode="json")})
+        except HTTPException as exc:
+            events.put({"type": "error", "message": str(exc.detail)})
+        except Exception as exc:  # noqa: BLE001 - reported to the client, never a broken stream
+            events.put({"type": "error", "message": f"{type(exc).__name__}: {exc}"})
+        finally:
+            telemetry.reset_emitter(token)
+            events.put(done)
+
+    threading.Thread(target=work, daemon=True).start()
+
+    def lines():
+        while (event := events.get()) is not done:
+            yield json.dumps(event, default=str) + "\n"
+
+    return StreamingResponse(
+        lines(),
+        media_type="application/x-ndjson",
+        headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.post("/sessions/{session_id}/reset", dependencies=[Depends(authorised)])

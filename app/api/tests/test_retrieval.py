@@ -106,7 +106,7 @@ class SequenceLLM:
         self.messages.append(user)
         return self.plans.pop(0)
 
-    def chat(self, system, user, schema=None, max_tokens=None):
+    def chat(self, system, user, schema=None, max_tokens=None, **_):
         return self.narrative
 
     def available(self):

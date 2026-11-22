@@ -11,7 +11,9 @@ Rules:
 - Use only metric and dimension names from the lists above, exactly as written.
 - intent: trend (over time), compare (a period versus the previous one), rank (top or
   bottom N), breakdown (split by a dimension), lookup (one value), clarify (the question
-  is too vague to choose a metric), unsupported (the data cannot answer).
+  is too vague to choose a metric), unsupported (the data cannot answer), general (no
+  figures of the taxi data are asked: a concept, the platform, the assistant, a
+  definition, general knowledge).
 - Periods are words, never dates you compute: latest_month ("this month", "latest"),
   previous_month ("last month"), last_3_months, all_months, or custom with start_month
   and end_month as YYYY-MM when the manager names months (even a month that may not be

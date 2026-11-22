@@ -105,7 +105,8 @@
        "unsupported",
        "empty",
        "model_unavailable",
-       "query_failed"
+       "query_failed",
+       "general"
       ],
       "title": "Status",
       "type": "string"
@@ -432,7 +433,8 @@
      "breakdown",
      "lookup",
      "clarify",
-     "unsupported"
+     "unsupported",
+     "general"
     ],
     "title": "Intent",
     "type": "string"
@@ -1388,6 +1390,62 @@
      }
     },
     "summary": "Ask"
+   }
+  },
+  "/sessions/{session_id}/ask/stream": {
+   "post": {
+    "description": "The same answer as /ask, with its progress as it happens, one JSON object per line:\n{\"type\": \"step\", \"step\": \"plan\", \"state\": \"start\" | \"done\", \"ms\": ...} for each step,\n{\"type\": \"token\", \"text\": \"...\"} as the model writes (the text is checked only at the\nend: it may be replaced), then {\"type\": \"answer\", \"answer\": {...}} (the checked\nanswer, as /ask returns it) or {\"type\": \"error\", \"message\": \"...\"}.",
+    "operationId": "ask_stream_sessions__session_id__ask_stream_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "session_id",
+      "required": true,
+      "schema": {
+       "title": "Session Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "header",
+      "name": "authorization",
+      "required": false,
+      "schema": {
+       "default": "",
+       "title": "Authorization",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/AskBody"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/x-ndjson": {}
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Ask Stream"
    }
   },
   "/sessions/{session_id}/reset": {

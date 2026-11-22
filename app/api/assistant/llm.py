@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import threading
+from collections.abc import Callable
 from pathlib import Path
 
 import httpx
@@ -66,8 +67,12 @@ class Ollama:
         user: str,
         schema: dict | str | None = None,
         max_tokens: int | None = None,
+        on_token: Callable[[str], None] | None = None,
+        temperature: float = 0,
     ) -> str:
-        options: dict = {"temperature": 0, "num_ctx": 4096}
+        """The model's reply. With `on_token`, the reply is streamed: every piece of text is
+        passed to `on_token` as the model writes it, and the whole text is returned."""
+        options: dict = {"temperature": temperature, "num_ctx": 4096}
         if self.threads:
             options["num_thread"] = self.threads
         if max_tokens:
@@ -75,12 +80,14 @@ class Ollama:
         body = {
             "model": self.model,
             "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
-            "stream": False,
+            "stream": on_token is not None,
             "keep_alive": keep_alive_value(self.keep_alive),  # -1: the model stays loaded
             "options": options,
         }
         if schema is not None:
             body["format"] = schema  # structured output: the reply must match the schema
+        if on_token is not None:
+            return self._stream(body, on_token)
         try:
             with self.slots:  # waits for its turn; the wait counts in the caller's timings
                 response = self.http.post(f"{self.url}/api/chat", json=body)
@@ -96,6 +103,35 @@ class Ollama:
         payload = response.json()
         telemetry.record_llm_call(payload)
         return payload["message"]["content"]
+
+    def _stream(self, body: dict, on_token: Callable[[str], None]) -> str:
+        """Ollama streams one JSON object per line; the last one ("done") carries the
+        token counts and durations, recorded like a non-streamed call."""
+        parts: list[str] = []
+        try:
+            with (
+                self.slots,
+                self.http.stream("POST", f"{self.url}/api/chat", json=body) as response,
+            ):
+                if response.status_code >= 400:
+                    detail = response.read().decode(errors="replace")[:200].strip()
+                    status = response.status_code
+                    raise ModelUnavailable(
+                        f"language model refused the request (HTTP {status}): {detail}"
+                    )
+                for line in response.iter_lines():
+                    if not line.strip():
+                        continue
+                    chunk = json.loads(line)
+                    piece = chunk.get("message", {}).get("content", "")
+                    if piece:
+                        parts.append(piece)
+                        on_token(piece)
+                    if chunk.get("done"):
+                        telemetry.record_llm_call(chunk)
+        except httpx.HTTPError as exc:
+            raise ModelUnavailable(f"language model unavailable: {type(exc).__name__}") from exc
+        return "".join(parts)
 
     def planner_system(self, system: str, model_cls: type[BaseModel]) -> str:
         """Outside "schema" mode the decoder does not enforce the schema, so the fields are

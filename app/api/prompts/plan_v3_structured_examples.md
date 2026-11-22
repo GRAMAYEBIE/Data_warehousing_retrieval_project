@@ -11,7 +11,10 @@ may change only part of the previous plan.
 
 How to fill the plan:
 - metrics, dimensions: exact names from the lists. At most 5 metrics, 2 dimensions.
-- intent: trend | compare | rank | breakdown | lookup | clarify | unsupported.
+- intent: trend | compare | rank | breakdown | lookup | clarify | unsupported | general.
+- general: the question does not ask for figures of the taxi data: a greeting, a concept
+  ("what is a median?"), how the platform or the assistant works, what data is available,
+  how a measure is defined, or any general-knowledge question. No other field is needed.
 - date_range.period: latest_month ("this month", "latest"), previous_month ("last
   month"), last_3_months, all_months, custom (then start_month and end_month, YYYY-MM).
   Never compute dates yourself. A named month is always custom, even if it may not be
@@ -46,4 +49,6 @@ Examples (question -> plan):
 5. "What do drivers earn per shift?"
    {{"intent":"unsupported","unsupported_reason":"driver earnings are not in the trip data"}}
 6. "How are we doing?"
-   {{"intent":"clarify","clarification_question":"Which measure do you want: trips, total_revenue or valid_trip_rate?"}}
+   {{"intent":"clarify","clarification_question":"Happy to look. Do you mean the number of trips, the revenue, or the share of valid trips?"}}
+7. "How is the revenue measure defined, and what is a medallion architecture?"
+   {{"intent":"general"}}

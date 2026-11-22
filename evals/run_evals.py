@@ -65,6 +65,14 @@ def check(case: dict, response: dict) -> tuple[bool, list[str]]:
             and expect["reason_contains_if_rejected"] not in reasons:
         notes.append("rejected for another reason")
         ok = False
+    # A conversational answer: about the topic, and without figures of the taxi data.
+    narrative = (response.get("narrative") or "").lower()
+    for word in expect.get("narrative_contains", []):
+        if word.lower() not in narrative:
+            notes.append(f"answer does not mention '{word}'")
+            ok = False
+    if status == "general" and response.get("narrative_check") == "replaced":
+        notes.append("figures of the data were removed from the conversational answer")
     return ok, notes
 
 

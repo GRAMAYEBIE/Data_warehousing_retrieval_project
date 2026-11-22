@@ -12,9 +12,9 @@ import uuid
 from dataclasses import dataclass, field
 
 from assistant import guards, metrics, retrieval, telemetry
-from assistant.catalog import RELATIONS, Catalog, load_catalog
+from assistant.catalog import DIMENSIONS, RELATIONS, Catalog, load_catalog
 from assistant.config import Settings
-from assistant.grounding import ground, named_period
+from assistant.grounding import ground, named_period, names_a_metric
 from assistant.llm import (
     MalformedOutput,
     ModelUnavailable,
@@ -72,6 +72,8 @@ class Session:
     active_filters: list[Filter] = field(default_factory=list)
     last_plan: QueryPlan | None = None
     turns: int = 0
+    # The last exchanges (question, answer text), for a conversation that follows on.
+    history: list[tuple[str, str]] = field(default_factory=list)
 
 
 class Assistant:
@@ -189,6 +191,8 @@ class Assistant:
             self.llm.warm_up(self.llm.planner_system(system, QueryPlan))
         with telemetry.step("warm_up_narrator", timings):
             self.llm.warm_up(load_prompt("narrate"))
+        with telemetry.step("warm_up_conversation", timings):
+            self.llm.warm_up(load_prompt("converse"))
         return timings
 
     @staticmethod
@@ -243,6 +247,7 @@ class Assistant:
         }
 
         def finish(answer: Answer, **audit) -> Answer:
+            session.history = (session.history + [(question, answer.narrative[:600])])[-4:]
             answer.duration_ms = int((time.monotonic() - start) * 1000)
             answer.active_filters = list(session.active_filters)
             answer.step_ms = dict(timings)
@@ -341,6 +346,46 @@ class Assistant:
                         narrative="I cannot answer this as asked: " + "; ".join(exc.reasons) + ".",
                     )
                 )
+        # A conversation, not a data request: a concept, the platform, the assistant itself,
+        # general knowledge. A "clarify" plan for a question that names no measure is one
+        # too (observed: "do you think your answers should be more written?" was answered
+        # with "which measure do you want?").
+        if plan.intent == Intent.general or (
+            plan.intent == Intent.clarify and not names_a_metric(question)
+        ):
+            try:
+                with telemetry.step("converse", timings):
+                    text, removed = self.converse(question, session)
+            except ModelUnavailable as exc:
+                return finish(
+                    Answer(
+                        session_id=session.session_id,
+                        status="model_unavailable",
+                        question=question,
+                        reasons=[str(exc)],
+                        narrative="The language model is not available right now. The "
+                        "dashboards still show every governed measure.",
+                    )
+                )
+            return finish(
+                Answer(
+                    session_id=session.session_id,
+                    status="general",
+                    question=question,
+                    plan=plan.model_copy(update={"intent": Intent.general}),
+                    narrative=text,
+                    narrative_check="replaced" if removed else "not_needed",
+                    reasons=(
+                        [
+                            f"{removed} sentence(s) with figures of the taxi data removed: such "
+                            "figures come only from governed queries"
+                        ]
+                        if removed
+                        else []
+                    ),
+                    suggested_followup="How many trips did we have last month?",
+                )
+            )
         if plan.intent == Intent.unsupported:
             return finish(
                 Answer(
@@ -561,7 +606,9 @@ class Assistant:
         try:
             # Rules in the system prompt (same every time), data in the message.
             # 2 or 3 sentences fit in 120 tokens; longer output only costs time.
-            text = self.llm.chat(load_prompt("narrate"), message, max_tokens=120).strip()
+            text = self.llm.chat(
+                load_prompt("narrate"), message, max_tokens=320, **self.token_stream()
+            ).strip()
         except ModelUnavailable as exc:
             return fallback, "replaced", f"narrative not written by the model: {exc}"
         bad = guards.unsupported_numbers(text, rows[:20])
@@ -583,6 +630,64 @@ class Assistant:
                 f"Model text: {text[:400]}",
             )
         return text, "passed", None
+
+    @staticmethod
+    def token_stream() -> dict:
+        """When someone listens (streaming endpoint), the model's text is passed on as it is
+        written; otherwise the call is a plain one (and test doubles need no streaming)."""
+        if not telemetry.streaming():
+            return {}
+        return {"on_token": lambda piece: telemetry.emit({"type": "token", "text": piece})}
+
+    def platform_facts(self) -> str:
+        """What the assistant knows about the platform, for conversational answers."""
+        cat = self.catalog()
+        months = f"{cat.months[0]} to {cat.months[-1]}" if cat.months else "none yet"
+        measures = "\n".join(
+            f"- {m['label']} ({m['unit']}): {m['description']}" for m in cat.metrics.values()
+        )
+        dimensions = ", ".join(d.replace("_", " ") for d in DIMENSIONS)
+        return (
+            "PLATFORM FACTS\n"
+            "- Data: NYC TLC Yellow Taxi trip records, monthly files, published months "
+            f"{months} (publication {cat.published_run}). One row per completed trip.\n"
+            "- Pipeline: bronze (raw, as received) -> silver (typed, quality flags, nothing "
+            "deleted) -> gold (star schema and aggregates) -> analytics (published only after "
+            "a quality gate). Orchestrated by Airflow with dbt; PostgreSQL; dashboards in "
+            "Superset.\n"
+            f"- You: a local language model ({self.settings.model}) served by Ollama, on "
+            "the platform's own machine; questions never leave it.\n"
+            "- How a data answer is produced: you write a JSON plan with governed measures; "
+            "code validates it against the catalogue and the question; an approved SQL "
+            "template runs read-only on the published layer; you explain the result; code "
+            "checks every number of the text against the result and replaces the text if "
+            "one is not there. Every answer is logged with its trace.\n"
+            f"- Breakdowns available: {dimensions}.\n"
+            "- Not in the data: driver earnings, wait times, cancellations, rider identity, "
+            "profit, weather, Uber/Lyft/Green taxis.\n"
+            f"- Governed measures:\n{measures}"
+        )
+
+    def converse(self, question: str, session: Session) -> tuple[str, int]:
+        """A conversational answer: general knowledge and the platform, no data figures."""
+        history = "\n".join(
+            f"Earlier question: {q}\nYour answer: {a}" for q, a in session.history[-3:]
+        )
+        message = (
+            f"{self.platform_facts()}\n\n"
+            + (f"CONVERSATION SO FAR\n{history}\n\n" if history else "")
+            + f"QUESTION: {question}"
+        )
+        text = self.llm.chat(
+            load_prompt("converse"), message, max_tokens=500, temperature=0.3, **self.token_stream()
+        ).strip()
+        text, removed = guards.scrub_data_figures(text)
+        if removed:
+            text += (
+                "\n\n*Figures about the taxi data come only from governed queries: ask me for "
+                "the figure and I will compute it from the published data.*"
+            )
+        return text or "Could you tell me a bit more about what you would like to know?", removed
 
     def provenance(self, resolved, rendered: str, row_count: int) -> Provenance:
         cat = self.catalog()

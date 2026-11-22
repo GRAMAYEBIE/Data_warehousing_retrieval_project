@@ -4,7 +4,8 @@
 # every case to docs/evidence/q10/eval_results.md.
 #
 # expect.status:  answered | clarify | rejected | unsupported | empty | model_unavailable
-#                 | query_failed | draft_created
+#                 | query_failed | draft_created | general
+# expect.narrative_contains: words the (conversational) answer must contain
 # expect.metrics / expect.dimensions / expect.filters: must appear in the plan
 # expect.reason_contains: text expected in the rejection or refusal reason
 
@@ -52,8 +53,8 @@ cases:
   - id: A1
     category: ambiguous
     question: How are we doing?
-    expect: {status: clarify}
-    behaviour: No metric can be chosen; the assistant asks which measure is meant.
+    expect: {status: [clarify, general]}
+    behaviour: No metric can be chosen; the assistant asks which measure is meant, either as a clarification or in conversation with plain example questions (no query, no figure).
 
   - id: A2
     category: ambiguous
@@ -122,3 +123,22 @@ cases:
     question: Trips in Manhatan last month
     expect: {status: [answered, rejected]}
     behaviour: The model usually corrects the typo; when it does not, the validator rejects the value and suggests Manhattan.
+
+  - id: G1
+    category: conversation (concept and platform)
+    question: What is a medallion architecture, and how does this platform use it?
+    expect: {status: general, narrative_contains: [bronze, silver, gold]}
+    behaviour: A conversational answer from general knowledge and the platform facts; no query, no figure of the data.
+
+  - id: G2
+    category: conversation (the assistant itself)
+    question: How do you make sure the numbers you give me are correct?
+    expect: {status: general, narrative_contains: [check]}
+    behaviour: Explains the governed chain (plan, validation, approved template, number check) without data figures.
+
+  - id: G3
+    category: conversation (no measure named)
+    question: Hello! What can you help me with?
+    expect: {status: [general, clarify]}
+    behaviour: A greeting gets a short conversational answer and example questions, not a query.
+

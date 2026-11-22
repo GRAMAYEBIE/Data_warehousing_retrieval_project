@@ -407,7 +407,10 @@ services:
       PGDATABASE: ${POSTGRES_DB}
       AI_READER_PASSWORD: ${AI_READER_PASSWORD}
       AI_AUDIT_WRITER_PASSWORD: ${AI_AUDIT_WRITER_PASSWORD}
-      OLLAMA_URL: http://ollama:11434
+      # The Ollama container by default. On macOS, Docker cannot use the Apple GPU: Ollama
+      # installed on the host (Metal) is reached with OLLAMA_URL=http://host.docker.internal:11435
+      # (see README, Windows and macOS).
+      OLLAMA_URL: ${OLLAMA_URL:-http://ollama:11434}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:3b}
       PROMPT_VARIANT: ${PROMPT_VARIANT:-v3_structured_examples}
       OLLAMA_NUM_THREAD: ${OLLAMA_NUM_THREAD:-0}
@@ -424,6 +427,8 @@ services:
       OTEL_SERVICE_NAME: nyc-taxi-assistant
     ports:
       - "${API_PORT:-8000}:8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"  # the host's Ollama, also on Linux
     depends_on:
       postgres:
         condition: service_healthy

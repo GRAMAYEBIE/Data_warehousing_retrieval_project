@@ -100,7 +100,7 @@ class FakeLLM:
             raise ModelUnavailable("language model unavailable: ConnectError")
         return self.plan
 
-    def chat(self, system, user, schema=None, max_tokens=None):
+    def chat(self, system, user, schema=None, max_tokens=None, **_):
         if self.down:
             raise ModelUnavailable("down")
         return self.narrative
@@ -312,7 +312,7 @@ def scripted_ollama(replies, mode="free"):
     llm = Ollama("http://x", "fake", 1, output_mode=mode)
     calls = []
 
-    def chat(system, user, schema=None, max_tokens=None):
+    def chat(system, user, schema=None, max_tokens=None, **_):
         calls.append({"system": system, "user": user, "schema": schema})
         return replies[len(calls) - 1]
 
@@ -480,3 +480,74 @@ def test_number_check_accepts_percentages_and_millions():
     rows = [["2025-01", 0.914441, 3477899]]
     assert guards.unsupported_numbers("91.4 % valid, 3.48 million trips", rows) == []
     assert guards.unsupported_numbers("4.2 million trips", rows) == [4200000.0]
+
+
+# ------------------------------------------------------------------ conversation and live progress
+def test_a_general_question_gets_a_conversational_answer_without_data_figures():
+    text = (
+        "A **medallion architecture** organises data in layers: bronze, silver and gold. "
+        "Last month there were 3,500,000 trips in the city. "
+        "Here, only published, quality-checked data answers figures."
+    )
+    a = assistant(plan=plan(intent=Intent.general), narrative=text)
+    answer = a.ask("What is a medallion architecture?")
+    assert answer.status == "general"
+    assert "3,500,000" not in answer.narrative and "medallion architecture" in answer.narrative
+    assert answer.narrative_check == "replaced" and "governed queries" in answer.reasons[0]
+
+
+def test_a_clarify_plan_for_a_question_without_measure_becomes_a_conversation():
+    # Observed: "do you think your answers should be more written?" got "which measure?".
+    a = assistant(
+        plan=plan(intent=Intent.clarify, clarification_question="Which measure?"),
+        narrative="Yes, I can.",
+    )
+    answer = a.ask("Do you think your answers should be more written?")
+    assert answer.status == "general" and answer.narrative == "Yes, I can."
+    vague = assistant(plan=plan(intent=Intent.clarify, clarification_question="Which measure?"))
+    assert vague.ask("How is revenue doing?").status == "clarify"
+
+
+def test_figures_of_the_data_are_scrubbed_but_years_and_small_counts_stay():
+    text, removed = guards.scrub_data_figures(
+        "The platform covers 2024 and 2025. It has 6 layers of checks.\n"
+        "- Average fare is about 19.50 USD.\n- Months are published after a quality gate."
+    )
+    assert removed == 1 and "19.50" not in text
+    assert "2024 and 2025" in text and "6 layers" in text and "quality gate" in text
+
+
+class StreamingLLM(FakeLLM):
+    def chat(self, system, user, schema=None, max_tokens=None, on_token=None, **_):
+        for piece in self.narrative.split(" "):
+            if on_token:
+                on_token(piece + " ")
+        return self.narrative
+
+
+def test_progress_events_report_each_step_and_the_text_as_it_is_written():
+    from assistant import telemetry
+
+    a = Assistant(
+        SETTINGS,
+        llm=StreamingLLM(
+            plan(intent=Intent.lookup, metrics=["trips"]), "Trips were 249,175 last month."
+        ),
+        store=FakeStore(["trips"], [[249175]]),
+    )
+    a._catalog = CATALOG
+    events: list[dict] = []
+    token = telemetry.set_emitter(events.append)
+    try:
+        answer = a.ask("How many trips last month?")
+    finally:
+        telemetry.reset_emitter(token)
+    steps = [(e["step"], e["state"]) for e in events if e["type"] == "step"]
+    assert ("plan", "start") in steps and ("narrate", "done") in steps
+    assert (
+        steps.index(("plan", "start"))
+        < steps.index(("execute", "start"))
+        < steps.index(("narrate", "start"))
+    )
+    text = "".join(e["text"] for e in events if e["type"] == "token")
+    assert text.strip() == answer.narrative and answer.status == "answered"

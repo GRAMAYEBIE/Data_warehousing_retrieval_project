@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import os
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 
@@ -28,6 +28,28 @@ _configured = False
 # Model usage of the current answer, per step: {"plan": {"prompt_tokens": ..., ...}}.
 _usage: ContextVar[dict | None] = ContextVar("llm_usage", default=None)
 _step: ContextVar[str] = ContextVar("assistant_step", default="other")
+# Live progress of the answer being computed (the streaming endpoint): step starts and
+# ends, and the text as the model writes it. None: nobody listens.
+_emitter: ContextVar[Callable[[dict], None] | None] = ContextVar("assistant_emitter", default=None)
+
+
+def set_emitter(emit: Callable[[dict], None] | None):
+    """Send the progress events of this context to `emit`; returns a token for reset."""
+    return _emitter.set(emit)
+
+
+def reset_emitter(token) -> None:
+    _emitter.reset(token)
+
+
+def emit(event: dict) -> None:
+    listener = _emitter.get()
+    if listener is not None:
+        listener(event)
+
+
+def streaming() -> bool:
+    return _emitter.get() is not None
 
 
 def setup(app=None) -> None:
@@ -63,12 +85,14 @@ def step(name: str, timings: dict[str, int], **attributes) -> Iterator[trace.Spa
     """One step of the answer: a span, and its duration in milliseconds in `timings`."""
     start = time.monotonic()
     token = _step.set(name)
+    emit({"type": "step", "step": name, "state": "start"})
     with tracer.start_as_current_span(f"assistant.{name}", attributes=attributes) as span:
         try:
             yield span
         finally:
             timings[name] = int((time.monotonic() - start) * 1000)
             _step.reset(token)
+            emit({"type": "step", "step": name, "state": "done", "ms": timings[name]})
 
 
 def start_usage() -> dict:

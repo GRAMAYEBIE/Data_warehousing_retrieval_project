@@ -29,6 +29,9 @@ class Intent(StrEnum):
     lookup = "lookup"  # one value
     clarify = "clarify"  # the question is too vague: ask the user
     unsupported = "unsupported"  # the data cannot answer it
+    # Not a request for figures from the taxi data: a concept, the project, the assistant
+    # itself, general knowledge. Answered in conversation, never with figures of the data.
+    general = "general"
 
 
 class Period(StrEnum):
@@ -121,6 +124,7 @@ class Answer(Contract):
         "empty",
         "model_unavailable",
         "query_failed",
+        "general",  # a conversational answer, not computed from the data
     ]
     question: str
     plan: QueryPlan | None = None
