@@ -64,10 +64,15 @@ def _result_values(rows: list[list]) -> list[float]:
 
 
 def _matches(number: float, candidates: list[float]) -> bool:
-    for v in candidates:
+    # Magnitudes are compared: a change is written without its sign ("down 3.2 %" for
+    # -3.16), the direction being carried by the words.
+    number = abs(number)
+    for v in map(abs, candidates):
         if v == number:
             return True
-        tolerance = max(abs(v) * 0.006, 0.006)  # rounding to 3 significant digits or 2 decimals
+        # Rounding to 3 significant digits, or to one decimal ("-3.2 %" for -3.16, observed
+        # rejected while it is an honest rounding).
+        tolerance = max(abs(v) * 0.006, 0.0501)
         if abs(v - number) <= tolerance:
             return True
     return False
@@ -139,27 +144,89 @@ def format_value(value, unit: str) -> str:
 def deterministic_summary(
     columns: list[str], rows: list[list], metrics: dict[str, dict], period: str, filters: str
 ) -> str:
-    """A factual summary that quotes the result only (used when the model is not trusted)."""
+    """A factual summary, in sentences, that quotes the result only (used when the model's
+    text is not trusted). `period` is "April 2025" or "April 2025 compared with March 2025";
+    `filters` is "" or " (pickup borough: Manhattan)"."""
     if not rows:
-        return f"No data matches this question for {period}{filters}."
-    lines = [f"Result for {period}{filters}:"]
-    dims = [c for c in columns if c not in metrics and not any(c.startswith(m) for m in metrics)]
-    for row in rows[:5]:
-        label = ", ".join(str(row[columns.index(d)]) for d in dims) or "total"
-        parts = []
-        for name, meta in metrics.items():
-            for col in (name, f"{name}_current", f"{name}_change_pct"):
-                if col in columns:
-                    value = row[columns.index(col)]
-                    shown = (
-                        f"{value} %"
-                        if col.endswith("_pct") and value is not None
-                        else format_value(value, meta["unit"])
-                    )
-                    parts.append(
-                        f"{meta['label']}{' change' if col.endswith('_pct') else ''} {shown}"
-                    )
-        lines.append(f"- {label}: " + "; ".join(parts))
-    if len(rows) > 5:
-        lines.append(f"({len(rows) - 5} more rows in the table.)")
-    return "\n".join(lines)
+        return f"No trips match this question for {period}{filters}."
+    current, _, previous = period.partition(" compared with ")
+    metric_columns = {c for m in metrics for c in columns if c == m or c.startswith(f"{m}_")}
+    dims = [c for c in columns if c not in metric_columns and c != "period_role"]
+    first, meta = next(iter(metrics.items()))
+
+    def cell(row: list, column: str):
+        return row[columns.index(column)] if column in columns else None
+
+    def change_of(row: list, name: str) -> float | None:
+        pct = cell(row, f"{name}_change_pct")
+        if pct is not None:
+            return float(pct)
+        now, before = cell(row, f"{name}_current"), cell(row, f"{name}_previous")
+        if now is None or before in (None, 0):
+            return None
+        return (float(now) - float(before)) / abs(float(before)) * 100
+
+    def member(row: list) -> str:
+        return ", ".join(str(cell(row, d)) for d in dims if d != "period")
+
+    if f"{first}_current" in columns:
+        if not dims:
+            sentences = []
+            for name, m in metrics.items():
+                now, before = cell(rows[0], f"{name}_current"), cell(rows[0], f"{name}_previous")
+                if now is None:
+                    continue
+                change = change_of(rows[0], name)
+                trend = (
+                    "unchanged"
+                    if change is None or round(change, 1) == 0
+                    else f"{'up' if change > 0 else 'down'} {abs(change):.1f} %"
+                )
+                sentences.append(
+                    f"{m['label']} was {format_value(now, m['unit'])} in {current}, {trend} from "
+                    f"{format_value(before, m['unit'])} in {previous or 'the previous period'}."
+                )
+            return " ".join(sentences) + (f" Filters: {filters.strip(' ()')}." if filters else "")
+        items = []
+        for row in rows[:5]:
+            change = change_of(row, first)
+            shown = format_value(cell(row, f"{first}_current"), meta["unit"])
+            items.append(
+                f"{member(row)} {shown}" + (f" ({change:+.1f} %)" if change is not None else "")
+            )
+        more = f", and {len(rows) - 5} more in the table" if len(rows) > 5 else ""
+        return (
+            f"{meta['label']} in {current} versus {previous or 'the previous period'}{filters}: "
+            + "; ".join(items)
+            + more
+            + "."
+        )
+
+    if "period" in columns and first in columns and len(rows) > 1:
+        points = [
+            (str(cell(r, "period"))[:10], cell(r, first))
+            for r in rows
+            if cell(r, first) is not None
+        ]
+        low, high = min(points, key=lambda p: float(p[1])), max(points, key=lambda p: float(p[1]))
+        return (
+            f"{meta['label']} for {period}{filters}, over {len(points)} points: highest "
+            f"{format_value(high[1], meta['unit'])} ({high[0]}), lowest "
+            f"{format_value(low[1], meta['unit'])} ({low[0]}), latest "
+            f"{format_value(points[-1][1], meta['unit'])} ({points[-1][0]})."
+        )
+
+    if len(rows) == 1 and not dims:
+        parts = [
+            f"{m['label']} {format_value(cell(rows[0], name), m['unit'])}"
+            for name, m in metrics.items()
+            if name in columns
+        ]
+        return f"{'; '.join(parts)} in {period}{filters}."
+
+    items = [
+        f"{member(row) or 'total'} {format_value(cell(row, first), meta['unit'])}"
+        for row in rows[:5]
+    ]
+    more = f", and {len(rows) - 5} more in the table" if len(rows) > 5 else ""
+    return f"{meta['label']} in {period}{filters}: " + "; ".join(items) + more + "."

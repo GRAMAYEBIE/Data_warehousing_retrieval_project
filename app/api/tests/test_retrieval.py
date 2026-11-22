@@ -181,6 +181,81 @@ def test_a_follow_up_without_measure_or_period_keeps_the_previous_ones():
     assert result.plan.filters == [Filter(dimension="pickup_borough", values=["Queens"])]
 
 
+REVENUE = {"total_revenue": {"label": "Total revenue", "unit": "USD"}}
+
+
+def test_the_factual_summary_of_a_comparison_is_a_sentence():
+    from assistant.guards import deterministic_summary, unsupported_numbers
+
+    columns = [
+        "total_revenue_previous",
+        "total_revenue_current",
+        "total_revenue_change",
+        "total_revenue_change_pct",
+    ]
+    rows = [[103022422.4, 99769323.1, -3253099.3, -3.16]]
+    text = deterministic_summary(columns, rows, REVENUE, "April 2025 compared with March 2025", "")
+    assert text == (
+        "Total revenue was 99,769,323 USD in April 2025, down 3.2 % from 103,022,422 USD "
+        "in March 2025."
+    )
+    assert "_" not in text and not unsupported_numbers(text, rows)
+
+
+def test_the_factual_summary_of_a_ranking_lists_members_with_their_values():
+    from assistant.guards import deterministic_summary
+
+    text = deterministic_summary(
+        ["pickup_borough", "total_revenue"],
+        [["Manhattan", 80000000], ["Queens", 15000000.5]],
+        REVENUE,
+        "April 2025",
+        " (payment type: Credit card)",
+    )
+    assert text == (
+        "Total revenue in April 2025 (payment type: Credit card): Manhattan 80,000,000 USD; "
+        "Queens 15,000,000 USD."
+    )
+
+
+def test_a_rounded_change_is_accepted_by_the_number_check():
+    from assistant.guards import unsupported_numbers
+
+    assert not unsupported_numbers("Revenue fell 3.2 % in April.", [[-3.16]])
+    assert unsupported_numbers("Revenue fell 3.4 % in April.", [[-3.16]]) == [3.4]
+
+
+def test_two_named_months_compared_become_month_versus_previous_month():
+    # Observed: "April 2025 compared with March 2025" became March-April versus
+    # January-February, while the text spoke of April versus March.
+    two_months = plan(
+        metrics=["total_revenue"],
+        date_range=DateRange(period=Period.custom, start_month="2025-03", end_month="2025-04"),
+    )
+    question = "Total revenue in April 2025 compared with March 2025"
+    result = ground(two_months, question, CATALOG, [])
+    assert result.plan.date_range == DateRange(
+        period=Period.custom, start_month="2025-04", end_month="2025-04"
+    )
+    assert result.plan.compare_to == "previous_period" and not result.missing
+
+
+def test_two_named_months_not_consecutive_are_refused_with_a_way_forward():
+    question = "Trips in April 2025 versus January 2025"
+    result = ground(plan(metrics=["trips"]), question, CATALOG, [])
+    assert result.missing and "month just before" in result.missing[0]
+    assert not PlanRejected(result.missing).repairable
+
+
+def test_two_named_months_without_comparison_stay_one_period():
+    question = "Trips from March 2025 to April 2025"
+    result = ground(plan(metrics=["trips"]), question, CATALOG, [])
+    assert result.plan.date_range == DateRange(
+        period=Period.custom, start_month="2025-03", end_month="2025-04"
+    )
+    assert result.plan.compare_to == "none"
+
+
 def test_follow_up_filters_are_kept_when_they_come_from_the_conversation():
     previous = [Filter(dimension="payment_type", values=["Cash"])]
     follow = plan(

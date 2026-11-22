@@ -37,6 +37,29 @@ from assistant.schemas import (
 from assistant.store import Store
 from assistant.validator import PlanRejected, resolve_months, validate
 
+ROLE_TEXT = {"current": "this period", "previous": "previous period", "change": "change"}
+MONTH_NAMES = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+]
+
+
+def month_name(month: str) -> str:
+    """'2025-04' -> 'April 2025'."""
+    year, number = month.split("-")[:2]
+    return f"{MONTH_NAMES[int(number) - 1]} {year}"
+
+
 LIMITATIONS = [
     "Trip volume is a proxy for demand: unserved demand is not visible.",
     "Data is reported by vendors; TLC does not guarantee its accuracy.",
@@ -503,8 +526,23 @@ class Assistant:
         # "90.5 %"): the model copies them instead of converting raw decimals, which is where
         # it erred (observed: 382800.41 written as $38,280.41, 249175 as 2.49 million).
         units = {c: metrics[c]["unit"] for c in columns if c in metrics}
+        # Comparison columns carry the unit of their measure, and every header is the
+        # governed label: the model copied raw names into its text (observed: "highest
+        # total_revenue_current: 202791744.60 USD").
+        headers = []
+        for c in columns:
+            base, _, role = c.rpartition("_")
+            if c in metrics:
+                headers.append(metrics[c]["label"])
+            elif base in metrics and role in ("current", "previous", "change"):
+                units[c] = metrics[base]["unit"]
+                headers.append(f"{metrics[base]['label']} ({ROLE_TEXT[role]})")
+            elif c.endswith("_change_pct") and c[: -len("_change_pct")] in metrics:
+                headers.append(f"{metrics[c[: -len('_change_pct')]]['label']} (change %)")
+            else:
+                headers.append(c.replace("_", " "))
         table = "\n".join(
-            [" | ".join(columns)]
+            [" | ".join(headers)]
             + [
                 " | ".join(
                     "" if v is None else guards.format_value(v, units[c]) if c in units else str(v)
@@ -577,30 +615,31 @@ class Assistant:
 
     @staticmethod
     def period_text(resolved) -> str:
-        text = (
-            resolved.months[0]
-            if len(resolved.months) == 1
-            else f"{resolved.months[0]} to {resolved.months[-1]}"
-        )
+        """Months in words ("April 2025", "March 2025 to April 2025"), as the narrative and
+        the factual summary quote them."""
+
+        def span(months: list[str]) -> str:
+            names = [month_name(m) for m in months]
+            return names[0] if len(names) == 1 else f"{names[0]} to {names[-1]}"
+
+        text = span(resolved.months)
         if resolved.comparison_months:
-            text += " compared with " + (
-                resolved.comparison_months[0]
-                if len(resolved.comparison_months) == 1
-                else f"{resolved.comparison_months[0]} to {resolved.comparison_months[-1]}"
-            )
+            text += " compared with " + span(resolved.comparison_months)
         return text
 
     @staticmethod
     def filters_text(filters: list[Filter]) -> str:
         if not filters:
             return ""
-        return (
-            " ("
-            + "; ".join(
-                f"{f.dimension} {f.operator.value} {', '.join(map(str, f.values))}" for f in filters
+
+        def one(f: Filter) -> str:
+            negated = f.operator.value in ("!=", "not in")
+            return (
+                f"{f.dimension.replace('_', ' ')}: {'not ' if negated else ''}"
+                f"{', '.join(map(str, f.values))}"
             )
-            + ")"
-        )
+
+        return " (" + "; ".join(one(f) for f in filters) + ")"
 
     def limitations(self, plan: QueryPlan) -> list[str]:
         notes = list(LIMITATIONS)
@@ -624,5 +663,5 @@ class Assistant:
         if plan.intent == Intent.compare:
             return "Ask for the weekly trend of the zones that changed most."
         if plan.dimensions:
-            return f"Compare with the previous month by {plan.dimensions[0]}."
+            return f"Compare with the previous month by {plan.dimensions[0].replace('_', ' ')}."
         return "Break this down by pickup borough."

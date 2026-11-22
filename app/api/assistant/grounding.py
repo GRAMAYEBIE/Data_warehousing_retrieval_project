@@ -86,6 +86,41 @@ def named_period(question: str) -> DateRange | None:
     return None
 
 
+COMPARE_WORDS = r"\b(compared? (with|to)|versus|vs\.?|against|than)\b"
+
+
+def _month_before(month: str) -> str:
+    year, number = map(int, month.split("-"))
+    return f"{year - 1}-12" if number == 1 else f"{year}-{number - 1:02d}"
+
+
+def named_comparison(question: str) -> tuple[str, str] | None:
+    """(current, previous) when the question compares two named months ("April 2025
+    compared with March 2025"). Without it the two months became one two-month period,
+    compared with the two months before (observed)."""
+    period = named_period(question)
+    if (
+        period is None
+        or period.period != Period.custom
+        or period.start_month == period.end_month
+        or not re.search(COMPARE_WORDS, question.lower())
+    ):
+        return None
+    text = question.lower()
+    found = re.findall(r"\b([a-z]+)\s+(20\d\d)\b", text) + [
+        (m, y) for y, m in re.findall(r"\b(20\d\d)-(0[1-9]|1[0-2])\b", text)
+    ]
+    months = {
+        f"{y}-{MONTHS[m]:02d}" if m in MONTHS else f"{y}-{m}"
+        for m, y in found
+        if m in MONTHS or m.isdigit()
+    }
+    if len(months) != 2:
+        return None
+    previous, current = sorted(months)
+    return current, previous
+
+
 def names_a_metric(question: str) -> bool:
     return re.search(METRIC_WORDS, question.lower()) is not None
 
@@ -105,6 +140,22 @@ def ground(
     context_values = {str(v).lower() for f in context for v in f.values}
 
     period = named_period(question)
+    comparison = named_comparison(question)
+    if comparison:
+        current, previous_month = comparison
+        if previous_month != _month_before(current):
+            # Only "versus the period just before" exists in the governed plan.
+            result.missing.append(
+                f"comparison of {current} with {previous_month}: only a comparison with the "
+                f"month just before is available (for example {current} compared with "
+                f"{_month_before(current)})"
+            )
+        period = DateRange(period=Period.custom, start_month=current, end_month=current)
+        if result.plan.compare_to != "previous_period":
+            result.notes.append(
+                f"comparison set from the question: {current} versus {previous_month}"
+            )
+            result.plan.compare_to = "previous_period"
     if period and result.plan.date_range != period:
         planned = result.plan.date_range.model_dump(mode="json", exclude_none=True)
         result.notes.append(
