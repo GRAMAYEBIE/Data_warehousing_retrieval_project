@@ -1,10 +1,36 @@
 import { motion } from "framer-motion";
-import { Activity, BarChart3, ExternalLink, FileBarChart2, Lock, MessageSquareText } from "lucide-react";
+import {
+  Activity,
+  ArrowUpRight,
+  BarChart3,
+  CarTaxiFront,
+  FileBarChart2,
+  Laptop,
+  Lock,
+  MessagesSquare,
+  Moon,
+  Sun,
+} from "lucide-react";
 import type { ReactNode } from "react";
 import type { CatalogView, Health } from "../api/client";
 import { useConfig } from "../lib/config";
+import { DATA_OWNER } from "../lib/measures";
+import { type Theme, useTheme } from "../lib/theme";
+import { spring } from "./motion";
 
 export type Page = "ask" | "reports";
+
+export function BrandMark({ size = 32 }: { size?: number }) {
+  return (
+    <span
+      className="grid shrink-0 place-items-center rounded-[9px] bg-accent text-accent-ink"
+      style={{ width: size, height: size }}
+      aria-hidden="true"
+    >
+      <CarTaxiFront size={size * 0.56} strokeWidth={2.2} />
+    </span>
+  );
+}
 
 type Props = {
   page: Page;
@@ -15,139 +41,122 @@ type Props = {
 
 export default function Sidebar({ page, onPage, health, catalog }: Props) {
   const config = useConfig();
-  const ready = health?.status === "ok" && health.model_available;
-  const months = health?.complete_months ?? [];
   return (
-    <aside className="sticky top-0 hidden h-screen w-[290px] shrink-0 flex-col bg-night-gradient text-slate-200 lg:flex">
-      <div className="h-1.5 bg-checker" />
-      <div className="flex items-center gap-3 px-6 pb-7 pt-7">
-        <motion.div
-          className="grid h-12 w-12 place-items-center rounded-2xl bg-taxi-gradient shadow-glow"
-          initial={{ rotate: -12, scale: 0.8, opacity: 0 }}
-          animate={{ rotate: 0, scale: 1, opacity: 1 }}
-          transition={{ type: "spring", stiffness: 260, damping: 18 }}
-        >
-          <span className="text-xl font-black tracking-tight text-night-900">M</span>
-        </motion.div>
-        <div>
-          <div className="text-lg font-bold tracking-tight text-white">MetroMove Insight</div>
-          <div className="text-sm text-slate-400">NYC Taxi analytics</div>
+    <aside className="sticky top-0 hidden h-screen w-[248px] shrink-0 flex-col border-r border-line bg-surface lg:flex">
+      <div className="flex h-16 items-center gap-2.5 px-5">
+        <BrandMark />
+        <div className="leading-tight">
+          <div className="font-display text-[15px] font-semibold">MetroMove Insight</div>
+          <div className="text-xs text-ink-3">NYC taxi analytics</div>
         </div>
       </div>
 
-      <nav className="space-y-1.5 px-3">
-        <div className="eyebrow px-3 pb-2 text-slate-500">Assistant</div>
-        <NavItem
-          active={page === "ask"}
-          onClick={() => onPage("ask")}
-          icon={<MessageSquareText size={19} />}
-          title="Ask a question"
-          hint="Plain English, governed answers"
-        />
-        <NavItem
-          active={page === "reports"}
-          onClick={() => onPage("reports")}
-          icon={<FileBarChart2 size={19} />}
-          title="Report builder"
-          hint="Draft, review, publish"
-        />
-        <div className="eyebrow px-3 pb-2 pt-6 text-slate-500">Platform</div>
-        <LinkItem href={config.supersetUrl} icon={<BarChart3 size={19} />} title="Dashboards" hint="Six strategic dashboards" />
+      <nav className="mt-2 flex flex-col gap-0.5 px-3" aria-label="Main">
+        <div className="label px-2.5 pb-1.5 pt-2">Assistant</div>
+        <NavItem active={page === "ask"} onClick={() => onPage("ask")} icon={<MessagesSquare size={16} />}>
+          Ask a question
+        </NavItem>
+        <NavItem active={page === "reports"} onClick={() => onPage("reports")} icon={<FileBarChart2 size={16} />}>
+          Report builder
+        </NavItem>
+        <div className="label px-2.5 pb-1.5 pt-5">Platform</div>
+        <LinkItem href={config.supersetUrl} icon={<BarChart3 size={16} />}>
+          Dashboards
+        </LinkItem>
         {config.showPlatformHealth && (
-          <LinkItem
-            href={config.grafanaUrl}
-            icon={<Activity size={19} />}
-            title="Platform health"
-            hint="Administrators · login required"
-            badge={<Lock size={13} className="text-taxi-400" />}
-          />
+          <LinkItem href={config.grafanaUrl} icon={<Activity size={16} />} badge={<Lock size={12} aria-label="Administrators only" />}>
+            Platform health
+          </LinkItem>
         )}
       </nav>
 
-      <div className="mt-auto space-y-3 p-4">
-        <div className="rounded-2xl border border-white/10 bg-white/5 p-4 backdrop-blur">
-          <div className="flex items-center gap-2.5 font-semibold text-white">
-            <span className="relative flex h-3 w-3">
-              {ready && <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-mint-500 opacity-60" />}
-              <span className={`relative inline-flex h-3 w-3 rounded-full ${ready ? "bg-mint-500" : "bg-coral-500"}`} />
-            </span>
-            {!health ? "Connecting…" : ready ? "Assistant ready" : "Model offline"}
-          </div>
-          <dl className="mt-3 space-y-2 text-sm">
-            <Row label="Model" value={health?.model ?? "-"} />
-            <Row label="Data" value={months.length ? `${months[0]} → ${months[months.length - 1]}` : "-"} />
-            <Row label="Publication" value={catalog?.published_run ?? "-"} />
-          </dl>
-          {health && !ready && (
-            <p className="mt-3 text-xs leading-relaxed text-slate-400">
-              Safeguards still answer; dashboards keep working.
-            </p>
-          )}
+      <div className="mt-auto space-y-3 p-3">
+        <StatusCard health={health} catalog={catalog} />
+        <div className="flex items-center justify-between px-2">
+          <span className="text-xs text-ink-3">Data owner · {DATA_OWNER}</span>
+          <ThemeSwitch />
         </div>
-        <p className="px-1 text-xs text-slate-500">Data owner · AYEBIE GRAM MESCHAC</p>
       </div>
     </aside>
   );
 }
 
-function Row({ label, value }: { label: string; value: string }) {
+export function StatusCard({ health, catalog }: { health?: Health; catalog?: CatalogView }) {
+  const ready = health?.status === "ok" && health.model_available;
+  const months = health?.complete_months ?? [];
   return (
-    <div className="flex justify-between gap-3">
-      <dt className="text-slate-400">{label}</dt>
-      <dd className="truncate font-medium text-slate-100">{value}</dd>
+    <div className="rounded-card border border-line bg-page/60 p-3.5" aria-live="polite">
+      <div className="flex items-center gap-2 text-sm font-medium">
+        <span className="relative flex h-2.5 w-2.5" aria-hidden="true">
+          {ready && <span className="blink absolute inline-flex h-full w-full rounded-full bg-good/60" />}
+          <span className={`relative inline-flex h-2.5 w-2.5 rounded-full ${!health ? "bg-ink-3" : ready ? "bg-good" : "bg-bad"}`} />
+        </span>
+        {!health ? "Connecting…" : ready ? "Assistant ready" : "Assistant offline"}
+      </div>
+      <dl className="mt-2.5 space-y-1.5 text-xs">
+        <Row label="Model" value={health?.model ?? "-"} />
+        <Row label="Data" value={months.length ? `${months[0]} → ${months[months.length - 1]}` : "-"} />
+        <Row label="Publication" value={catalog?.published_run ?? "-"} mono />
+      </dl>
     </div>
   );
 }
 
-type ItemProps = { icon: ReactNode; title: string; hint: string };
+function Row({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <div className="flex justify-between gap-3">
+      <dt className="text-ink-3">{label}</dt>
+      <dd className={`num truncate font-medium text-ink ${mono ? "font-mono text-[11px]" : ""}`}>{value}</dd>
+    </div>
+  );
+}
 
-function NavItem({ active, onClick, icon, title, hint }: ItemProps & { active: boolean; onClick: () => void }) {
+function NavItem({ active, onClick, icon, children }: { active: boolean; onClick: () => void; icon: ReactNode; children: ReactNode }) {
   return (
     <button
       onClick={onClick}
-      className={`relative flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left transition-colors ${
-        active ? "text-white" : "text-slate-300 hover:text-white"
+      aria-current={active ? "page" : undefined}
+      className={`relative flex h-9 w-full items-center gap-2.5 rounded-input px-2.5 text-left text-sm transition-colors duration-150 ${
+        active ? "font-medium text-primary-strong" : "text-ink-2 hover:bg-tint hover:text-ink"
       }`}
     >
-      {active && (
-        <motion.span
-          layoutId="nav-active"
-          className="absolute inset-0 rounded-2xl bg-white/10 ring-1 ring-white/10"
-          transition={{ type: "spring", stiffness: 380, damping: 32 }}
-        />
-      )}
-      <span
-        className={`relative grid h-10 w-10 place-items-center rounded-xl transition ${
-          active ? "bg-taxi-gradient text-night-900 shadow-glow" : "bg-white/5 text-slate-300"
-        }`}
-      >
-        {icon}
-      </span>
-      <span className="relative">
-        <span className="block font-semibold">{title}</span>
-        <span className="block text-xs text-slate-400">{hint}</span>
-      </span>
+      {active && <motion.span layoutId="nav-active" className="absolute inset-0 rounded-input bg-primary/10" transition={spring} />}
+      <span className="relative">{icon}</span>
+      <span className="relative">{children}</span>
     </button>
   );
 }
 
-function LinkItem({ href, icon, title, hint, badge }: ItemProps & { href: string; badge?: ReactNode }) {
+function LinkItem({ href, icon, badge, children }: { href: string; icon: ReactNode; badge?: ReactNode; children: ReactNode }) {
   return (
-    <motion.a
+    <a
       href={href}
       target="_blank"
       rel="noreferrer"
-      whileHover={{ x: 3 }}
-      className="group flex items-center gap-3 rounded-2xl px-3 py-3 text-slate-300 transition-colors hover:bg-white/5 hover:text-white"
+      className="group flex h-9 items-center gap-2.5 rounded-input px-2.5 text-sm text-ink-2 transition-colors duration-150 hover:bg-tint hover:text-ink"
     >
-      <span className="grid h-10 w-10 place-items-center rounded-xl bg-white/5">{icon}</span>
-      <span className="flex-1">
-        <span className="flex items-center gap-1.5 font-semibold">
-          {title} {badge}
-        </span>
-        <span className="block text-xs text-slate-400">{hint}</span>
-      </span>
-      <ExternalLink size={15} className="opacity-0 transition group-hover:opacity-100" />
-    </motion.a>
+      {icon}
+      <span className="flex-1">{children}</span>
+      {badge && <span className="text-ink-3">{badge}</span>}
+      <ArrowUpRight size={14} className="text-ink-3 opacity-0 transition-opacity group-hover:opacity-100" aria-hidden="true" />
+      <span className="sr-only">(opens in a new tab)</span>
+    </a>
+  );
+}
+
+const NEXT: Record<Theme, Theme> = { system: "light", light: "dark", dark: "system" };
+const ICON: Record<Theme, ReactNode> = { system: <Laptop size={15} />, light: <Sun size={15} />, dark: <Moon size={15} /> };
+
+export function ThemeSwitch() {
+  const [theme, setTheme] = useTheme();
+  return (
+    <button
+      className="btn-ghost h-8 w-8 p-0"
+      onClick={() => setTheme(NEXT[theme])}
+      aria-label={`Colour theme: ${theme}. Switch to ${NEXT[theme]}`}
+      title={`Theme: ${theme}`}
+    >
+      {ICON[theme]}
+    </button>
   );
 }

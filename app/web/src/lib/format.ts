@@ -23,6 +23,11 @@ export function seconds(ms: number): string {
   return ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`;
 }
 
+// "Manhattan", "not Bronx", "payment type: Cash" (a place speaks for itself).
 export function filterText(f: { dimension: string; operator: string; values: unknown[] }): string {
-  return `${f.dimension.replace(/_/g, " ")} ${f.operator} ${f.values.join(", ")}`;
+  const values = f.values.join(", ");
+  const negated = f.operator === "!=" || f.operator === "not in";
+  if (/borough|zone/.test(f.dimension)) return negated ? `not ${values}` : values;
+  const name = f.dimension.replace(/_/g, " ");
+  return negated ? `${name}: not ${values}` : `${name}: ${values}`;
 }

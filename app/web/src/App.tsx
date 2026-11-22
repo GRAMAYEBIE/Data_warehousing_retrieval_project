@@ -1,50 +1,103 @@
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { FileBarChart2, MessageSquareText } from "lucide-react";
+import { BarChart3, FileBarChart2, MessagesSquare } from "lucide-react";
 import { useState } from "react";
 import { api } from "./api/client";
 import AskView from "./components/AskView";
+import ErrorBoundary from "./components/ErrorBoundary";
+import { MeasuresDrawer, MeasuresList } from "./components/MeasuresPanel";
 import { ease } from "./components/motion";
 import ReportBuilder from "./components/ReportBuilder";
-import Sidebar, { type Page } from "./components/Sidebar";
+import Sidebar, { BrandMark, type Page, ThemeSwitch } from "./components/Sidebar";
+import { useConfig } from "./lib/config";
 
+// Visibility is the class (display), the motion is a short fade and rise on top of it.
 const PAGE = {
-  shown: { opacity: 1, y: 0, display: "block", transition: { duration: 0.35, ease } },
-  hidden: { opacity: 0, y: 10, transition: { duration: 0.15 }, transitionEnd: { display: "none" } },
+  shown: { opacity: 1, y: 0, transition: { duration: 0.25, ease } },
+  hidden: { opacity: 0, y: 6, transition: { duration: 0 } },
 };
 
 export default function App() {
   const [page, setPage] = useState<Page>("ask");
+  const [measuresOpen, setMeasuresOpen] = useState(false);
+  const [injected, setInjected] = useState<{ text: string; nonce: number }>();
   const health = useQuery({ queryKey: ["health"], queryFn: api.health, refetchInterval: 30_000 });
   const catalog = useQuery({ queryKey: ["catalog"], queryFn: api.catalog });
+  const askAbout = (text: string) => {
+    setPage("ask");
+    setInjected({ text, nonce: Date.now() });
+  };
 
   return (
-    <div className="flex min-h-screen">
+    <div className="flex h-screen overflow-hidden">
       <Sidebar page={page} onPage={setPage} health={health.data} catalog={catalog.data} />
-
-      <div className="min-w-0 flex-1">
-        {/* Compact navigation on small screens (the sidebar is hidden there). */}
-        <div className="flex items-center gap-3 bg-night-900 px-4 py-3 lg:hidden">
-          <span className="grid h-9 w-9 place-items-center rounded-xl bg-taxi-gradient font-black">M</span>
-          <span className="mr-auto font-bold text-white">MetroMove Insight</span>
-          <button className="text-slate-300" onClick={() => setPage("ask")} aria-label="Ask a question">
-            <MessageSquareText size={22} />
-          </button>
-          <button className="text-slate-300" onClick={() => setPage("reports")} aria-label="Report builder">
-            <FileBarChart2 size={22} />
-          </button>
-        </div>
-
-        <main className="mx-auto max-w-[1240px] px-4 py-6 sm:px-8 sm:py-9">
+      <div className="flex min-w-0 flex-1 flex-col">
+        <MobileNav page={page} onPage={setPage} ready={health.data?.status === "ok" && Boolean(health.data?.model_available)} />
+        <div className="flex min-h-0 flex-1">
           {/* Both pages stay mounted: switching page never loses a conversation or a draft. */}
-          <motion.div variants={PAGE} initial={false} animate={page === "ask" ? "shown" : "hidden"}>
-            <AskView catalog={catalog.data} health={health.data} />
-          </motion.div>
-          <motion.div variants={PAGE} initial={false} animate={page === "reports" ? "shown" : "hidden"}>
-            <ReportBuilder catalog={catalog.data} />
-          </motion.div>
-        </main>
+          <motion.main
+            className={`min-h-0 min-w-0 flex-1 flex-col ${page === "ask" ? "flex" : "hidden"}`}
+            initial={false}
+            animate={page === "ask" ? PAGE.shown : PAGE.hidden}
+            aria-label="Ask a question"
+          >
+            <ErrorBoundary label="conversation">
+              <AskView
+                catalog={catalog.data}
+                health={health.data}
+                injected={injected}
+                onOpenMeasures={() => setMeasuresOpen(true)}
+              />
+            </ErrorBoundary>
+          </motion.main>
+          <motion.main
+            className={`min-h-0 min-w-0 flex-1 flex-col overflow-y-auto ${page === "reports" ? "flex" : "hidden"}`}
+            initial={false}
+            animate={page === "reports" ? PAGE.shown : PAGE.hidden}
+            aria-label="Report builder"
+          >
+            <ErrorBoundary label="report builder">
+              <ReportBuilder catalog={catalog.data} />
+            </ErrorBoundary>
+          </motion.main>
+          {page === "ask" && (
+            <aside className="hidden w-[300px] shrink-0 border-l border-line bg-surface xl:block" aria-label="Governed measures">
+              <MeasuresList catalog={catalog.data} onAsk={askAbout} />
+            </aside>
+          )}
+        </div>
       </div>
+      <MeasuresDrawer open={measuresOpen} onClose={() => setMeasuresOpen(false)} catalog={catalog.data} onAsk={askAbout} />
     </div>
+  );
+}
+
+// Below 1024 px the sidebar becomes a top bar.
+function MobileNav({ page, onPage, ready }: { page: Page; onPage: (page: Page) => void; ready: boolean }) {
+  const config = useConfig();
+  const item = (target: Page, icon: JSX.Element, text: string) => (
+    <button
+      onClick={() => onPage(target)}
+      aria-current={page === target ? "page" : undefined}
+      className={`btn h-9 px-2.5 ${page === target ? "bg-primary/10 text-primary-strong" : "text-ink-2 hover:bg-tint"}`}
+    >
+      {icon}
+      <span className="hidden sm:inline">{text}</span>
+    </button>
+  );
+  return (
+    <nav className="flex h-14 shrink-0 items-center gap-1 border-b border-line bg-surface px-3 lg:hidden" aria-label="Main">
+      <BrandMark size={28} />
+      <span className="ml-1.5 mr-auto flex items-center gap-1.5 font-display text-sm font-semibold">
+        MetroMove
+        <span className={`h-2 w-2 rounded-full ${ready ? "bg-good" : "bg-bad"}`} aria-label={ready ? "Assistant ready" : "Assistant offline"} />
+      </span>
+      {item("ask", <MessagesSquare size={17} aria-hidden="true" />, "Ask")}
+      {item("reports", <FileBarChart2 size={17} aria-hidden="true" />, "Reports")}
+      <a className="btn h-9 px-2.5 text-ink-2 hover:bg-tint" href={config.supersetUrl} target="_blank" rel="noreferrer" aria-label="Dashboards (opens in a new tab)">
+        <BarChart3 size={17} aria-hidden="true" />
+      </a>
+      <ThemeSwitch />
+    </nav>
   );
 }
