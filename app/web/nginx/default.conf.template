@@ -18,6 +18,18 @@ server {
         proxy_buffering off;
     }
 
+    # Microphone: the recorded question goes to the local speech-to-text service. The
+    # service name is resolved per request (Docker DNS), so the interface still starts
+    # when the speech service is not running; the button then reports it unavailable.
+    location /speech/ {
+        resolver 127.0.0.11 valid=30s ipv6=off;
+        set $speech_upstream ${SPEECH_UPSTREAM};
+        rewrite ^/speech/(.*)$ /$1 break;
+        proxy_pass http://$speech_upstream;
+        client_max_body_size 12m;
+        proxy_read_timeout 120s;
+    }
+
     # Runtime configuration read by the browser at start-up: changing a URL or showing the
     # administrator links needs a restart, not a rebuild. Platform health (Grafana) is for
     # administrators: hidden unless SHOW_PLATFORM_HEALTH=true, and Grafana keeps its login.

@@ -8,6 +8,7 @@ import ErrorBoundary from "./ErrorBoundary";
 import HeroScene from "./HeroScene";
 import { ease, rise, spring, stagger } from "./motion";
 import ThinkingCard, { type Progress } from "./ThinkingCard";
+import VoiceButton from "./VoiceButton";
 
 const SUGGESTIONS: { icon: ReactNode; tone: string; topic: string; question: string }[] = [
   {
@@ -470,6 +471,15 @@ function Composer({
           large ? "py-3 text-base" : "py-2 text-base"
         }`}
       />
+      <div className="flex items-center self-end pb-0.5">
+        <VoiceButton
+          disabled={disabled || busy}
+          onText={(text) => {
+            onChange(value.trim() ? `${value.trim()} ${text}` : text);
+            inputRef.current?.focus();
+          }}
+        />
+      </div>
       <motion.button
         type="submit"
         disabled={!ready}

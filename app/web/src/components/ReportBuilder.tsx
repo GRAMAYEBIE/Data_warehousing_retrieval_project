@@ -4,6 +4,7 @@ import { ArrowUpRight, Check, CircleAlert, FileBarChart2, Loader2, Send } from "
 import { useState } from "react";
 import { ApiError, api, type CatalogView, type ReportView } from "../api/client";
 import { useConfig } from "../lib/config";
+import { Headline } from "./AnswerCard";
 import DataTable from "./DataTable";
 import { ease, spring } from "./motion";
 import ResultChart from "./ResultChart";
@@ -31,9 +32,9 @@ export default function ReportBuilder({ catalog }: { catalog?: CatalogView }) {
 
   const units = Object.fromEntries(Object.entries(catalog?.metrics ?? {}).map(([k, m]) => [k, m.unit]));
   const labels = Object.fromEntries(Object.entries(catalog?.metrics ?? {}).map(([k, m]) => [k, m.label]));
-  const spec = report?.specification as
-    | { explanation?: string; metrics?: string[]; extra_charts?: { metrics?: string[] }[] }
-    | undefined;
+  // The validated request is under specification.request (the API also lists the charts).
+  type Plan = { explanation?: string; metrics?: string[]; extra_charts?: { metrics?: string[] }[] };
+  const spec = (report?.specification as { request?: Plan } | undefined)?.request;
   const metricsOf = (i: number) => (i === 0 ? spec?.metrics : spec?.extra_charts?.[i - 1]?.metrics) ?? [];
   const error = draft.error ?? publish.error;
   const step = report?.status === "published" ? 3 : report ? 2 : 1;
@@ -129,7 +130,22 @@ export default function ReportBuilder({ catalog }: { catalog?: CatalogView }) {
                     </span>
                   </div>
                   <ResultChart columns={p.columns} rows={p.rows} metrics={metricsOf(i)} units={units} labels={labels} />
-                  {p.rows.length === 1 && <DataTable columns={p.columns} rows={p.rows} units={units} />}
+                  {p.rows.length === 1 && (
+                    <div className="grid gap-2">
+                      {metricsOf(i)
+                        .filter((m) => p.columns.includes(m) || p.columns.includes(`${m}_current`))
+                        .map((m) => (
+                          <Headline
+                            key={m}
+                            label={labels[m] ?? m}
+                            unit={units[m] ?? ""}
+                            metric={m}
+                            row={Object.fromEntries(p.columns.map((c, j) => [c, p.rows[0][j]]))}
+                            compared=""
+                          />
+                        ))}
+                    </div>
+                  )}
                   <details className="mt-3">
                     <summary className="cursor-pointer text-xs font-medium text-ink-2 hover:text-ink">Data and query</summary>
                     <div className="mt-2 space-y-2">

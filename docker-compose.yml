@@ -449,9 +449,24 @@ services:
       SUPERSET_PUBLIC_URL: ${SUPERSET_PUBLIC_URL:-http://localhost:8088}
       GRAFANA_PUBLIC_URL: ${GRAFANA_PUBLIC_URL:-http://localhost:3000}
       SHOW_PLATFORM_HEALTH: ${SHOW_PLATFORM_HEALTH:-false}
+      SPEECH_UPSTREAM: speech:8001
     ports:
       - "127.0.0.1:${WEB_PORT:-8090}:80"
     depends_on: [api]
+    restart: unless-stopped
+
+  # Local speech-to-text for the microphone button (faster-whisper on the CPU). Reached
+  # only by the web server on the internal network; the voice never leaves the machine.
+  # The model (SPEECH_MODEL: tiny, base, small) is downloaded once into its volume.
+  speech:
+    image: nyc-taxi-speech:local
+    build: ./app/speech
+    profiles: [ai]
+    environment:
+      SPEECH_MODEL: ${SPEECH_MODEL:-base}
+    volumes:
+      - speech_models:/models
+    mem_limit: 1500m
     restart: unless-stopped
 
   # ------------------------------------------------------------------ observability
@@ -627,6 +642,7 @@ services:
 
 volumes:
   ollama_models:
+  speech_models:
   airflow_logs:
   postgres_data:
   rustfs_data:

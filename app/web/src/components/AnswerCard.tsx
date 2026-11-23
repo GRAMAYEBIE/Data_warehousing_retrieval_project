@@ -347,7 +347,7 @@ function Item({ term, children }: { term: string; children: ReactNode }) {
   );
 }
 
-function Headline({
+export function Headline({
   label,
   unit,
   metric,

@@ -1,0 +1,4 @@
+# Pinned dependencies of the local speech-to-text service.
+fastapi==0.118.0
+uvicorn[standard]==0.37.0
+faster-whisper==1.2.1
