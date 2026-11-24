@@ -36,6 +36,18 @@ RUN python -m venv /opt/ingestion_venv \
 COPY --chown=airflow:root ingestion/ /opt/ingestion/
 RUN /opt/ingestion_venv/bin/pip install --no-deps /opt/ingestion
 
+# Demand forecast (wave 7) in its own virtual environment too; LightGBM needs OpenMP.
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /opt/forecast_venv /opt/forecast && chown -R airflow:root /opt/forecast_venv /opt/forecast
+USER airflow
+COPY --chown=airflow:root ml/requirements.txt /tmp/forecast-requirements.txt
+RUN python -m venv /opt/forecast_venv \
+    && /opt/forecast_venv/bin/pip install -r /tmp/forecast-requirements.txt
+COPY --chown=airflow:root ml/ /opt/forecast/
+RUN /opt/forecast_venv/bin/pip install --no-deps /opt/forecast
+
 ENV CONTRACTS_DIR=/opt/ingestion/contracts \
     PYTHONPATH=/opt/airflow/include \
     DBT_PACKAGES_INSTALL_PATH=/opt/dbt_deps/dbt_packages

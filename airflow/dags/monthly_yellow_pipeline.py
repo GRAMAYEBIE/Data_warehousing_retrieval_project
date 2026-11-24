@@ -32,6 +32,7 @@ from cosmos import DbtTaskGroup, ExecutionConfig, ProfileConfig, ProjectConfig, 
 from cosmos.constants import LoadMode, SourceRenderingBehavior, TestBehavior, TestIndirectSelection
 
 from nyc_taxi_ops import bi_refresh, dbt_results, outcome, publish, signals
+from nyc_taxi_ops.assets import ANALYTICS_PUBLISHED
 
 DAG_ID = "monthly_yellow_pipeline"
 DBT_PROJECT_DIR = Path(os.environ.get("DBT_PROJECT_DIR", "/opt/airflow/dbt"))
@@ -280,7 +281,11 @@ with DAG(
     measure = PythonOperator(task_id="measure_signals", python_callable=measure_signals)
 
     publish_task = PythonOperator(
-        task_id="quality_gate_and_publish", python_callable=gate_and_publish, retries=1
+        task_id="quality_gate_and_publish",
+        python_callable=gate_and_publish,
+        retries=1,
+        # A successful publication updates the asset: the demand forecast DAG follows.
+        outlets=[ANALYTICS_PUBLISHED],
     )
 
     refresh_bi = PythonOperator(

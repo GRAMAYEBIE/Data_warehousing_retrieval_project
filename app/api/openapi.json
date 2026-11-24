@@ -358,6 +358,234 @@
     "title": "Filter",
     "type": "object"
    },
+   "ForecastRun": {
+    "properties": {
+     "baseline_wmape": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Baseline Wmape"
+     },
+     "created_at": {
+      "title": "Created At",
+      "type": "string"
+     },
+     "data_run": {
+      "title": "Data Run",
+      "type": "string"
+     },
+     "forecast_month": {
+      "title": "Forecast Month",
+      "type": "string"
+     },
+     "history_months": {
+      "items": {
+       "type": "string"
+      },
+      "title": "History Months",
+      "type": "array"
+     },
+     "model": {
+      "title": "Model",
+      "type": "string"
+     },
+     "rounds": {
+      "title": "Rounds",
+      "type": "integer"
+     },
+     "run_id": {
+      "title": "Run Id",
+      "type": "string"
+     },
+     "validated_month": {
+      "title": "Validated Month",
+      "type": "string"
+     },
+     "wmape": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Wmape"
+     }
+    },
+    "required": [
+     "run_id",
+     "data_run",
+     "created_at",
+     "history_months",
+     "validated_month",
+     "forecast_month",
+     "model",
+     "rounds",
+     "wmape",
+     "baseline_wmape"
+    ],
+    "title": "ForecastRun",
+    "type": "object"
+   },
+   "ForecastScore": {
+    "properties": {
+     "actual_trips": {
+      "title": "Actual Trips",
+      "type": "number"
+     },
+     "baseline_mae": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Baseline Mae"
+     },
+     "baseline_wmape": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Baseline Wmape"
+     },
+     "bias": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Bias"
+     },
+     "coverage_80": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Coverage 80"
+     },
+     "mae": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Mae"
+     },
+     "rows": {
+      "title": "Rows",
+      "type": "integer"
+     },
+     "segment": {
+      "title": "Segment",
+      "type": "string"
+     },
+     "segment_type": {
+      "title": "Segment Type",
+      "type": "string"
+     },
+     "wmape": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Wmape"
+     }
+    },
+    "required": [
+     "segment_type",
+     "segment",
+     "rows",
+     "actual_trips",
+     "mae",
+     "wmape",
+     "bias",
+     "baseline_mae",
+     "baseline_wmape",
+     "coverage_80"
+    ],
+    "title": "ForecastScore",
+    "type": "object"
+   },
+   "ForecastView": {
+    "description": "The published demand forecast (an estimate, never a governed measure).",
+    "properties": {
+     "available": {
+      "title": "Available",
+      "type": "boolean"
+     },
+     "evaluation": {
+      "items": {
+       "$ref": "#/components/schemas/ForecastScore"
+      },
+      "title": "Evaluation",
+      "type": "array"
+     },
+     "message": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Message"
+     },
+     "run": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/ForecastRun"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "tables": {
+      "additionalProperties": {
+       "$ref": "#/components/schemas/OverviewTable"
+      },
+      "title": "Tables",
+      "type": "object"
+     }
+    },
+    "required": [
+     "available",
+     "message",
+     "run",
+     "evaluation",
+     "tables"
+    ],
+    "title": "ForecastView",
+    "type": "object"
+   },
    "HTTPValidationError": {
     "properties": {
      "detail": {
@@ -1177,6 +1405,47 @@
      }
     },
     "summary": "Catalog"
+   }
+  },
+  "/forecast": {
+   "get": {
+    "description": "The published demand forecast, its evaluation and run (written by the ml job).",
+    "operationId": "forecast_forecast_get",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "authorization",
+      "required": false,
+      "schema": {
+       "default": "",
+       "title": "Authorization",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ForecastView"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Forecast"
    }
   },
   "/health": {

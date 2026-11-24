@@ -11,6 +11,7 @@ import {
   MessagesSquare,
   Moon,
   Sun,
+  TrendingUp,
 } from "lucide-react";
 import type { ReactNode } from "react";
 import type { CatalogView, Health } from "../api/client";
@@ -19,7 +20,7 @@ import { DATA_OWNER } from "../lib/measures";
 import { type Theme, useTheme } from "../lib/theme";
 import { spring } from "./motion";
 
-export type Page = "overview" | "ask" | "reports";
+export type Page = "overview" | "forecast" | "ask" | "reports";
 
 export function BrandMark({ size = 32 }: { size?: number }) {
   return (
@@ -56,6 +57,9 @@ export default function Sidebar({ page, onPage, health, catalog }: Props) {
         <div className="label px-2.5 pb-1.5 pt-2">Insights</div>
         <NavItem active={page === "overview"} onClick={() => onPage("overview")} icon={<LayoutDashboard size={16} />}>
           Overview
+        </NavItem>
+        <NavItem active={page === "forecast"} onClick={() => onPage("forecast")} icon={<TrendingUp size={16} />}>
+          Forecast
         </NavItem>
         <div className="label px-2.5 pb-1.5 pt-5">Assistant</div>
         <NavItem active={page === "ask"} onClick={() => onPage("ask")} icon={<MessagesSquare size={16} />}>

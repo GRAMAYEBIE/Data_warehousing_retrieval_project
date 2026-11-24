@@ -48,7 +48,7 @@ server {
     location = /config.json {
         default_type application/json;
         add_header Cache-Control "no-store";
-        return 200 '{"supersetUrl":"${SUPERSET_PUBLIC_URL}","grafanaUrl":"${GRAFANA_PUBLIC_URL}","showPlatformHealth":${SHOW_PLATFORM_HEALTH}}';
+        return 200 '{"supersetUrl":"${SUPERSET_PUBLIC_URL}","grafanaUrl":"${GRAFANA_PUBLIC_URL}","mlflowUrl":"${MLFLOW_PUBLIC_URL}","showPlatformHealth":${SHOW_PLATFORM_HEALTH}}';
     }
 
     # Single-page application: every other path serves index.html.

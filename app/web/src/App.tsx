@@ -1,10 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { BarChart3, FileBarChart2, LayoutDashboard, MessagesSquare } from "lucide-react";
+import { BarChart3, FileBarChart2, LayoutDashboard, MessagesSquare, TrendingUp } from "lucide-react";
 import { useState } from "react";
 import { api } from "./api/client";
 import AskView from "./components/AskView";
 import ErrorBoundary from "./components/ErrorBoundary";
+import ForecastView from "./components/ForecastView";
 import { MeasuresDrawer, MeasuresList } from "./components/MeasuresPanel";
 import { ease } from "./components/motion";
 import OverviewView from "./components/OverviewView";
@@ -19,7 +20,12 @@ const PAGE = {
 };
 
 export default function App() {
-  const [page, setPage] = useState<Page>("overview");
+  const [page, setPageState] = useState<Page>("overview");
+  const [seen, setSeen] = useState<Partial<Record<Page, boolean>>>({ overview: true });
+  const setPage = (next: Page) => {
+    setSeen((s) => ({ ...s, [next]: true }));
+    setPageState(next);
+  };
   const [measuresOpen, setMeasuresOpen] = useState(false);
   const [injected, setInjected] = useState<{ text: string; nonce: number }>();
   const health = useQuery({ queryKey: ["health"], queryFn: api.health, refetchInterval: 30_000 });
@@ -45,6 +51,15 @@ export default function App() {
             <ErrorBoundary label="overview">
               <OverviewView catalog={catalog.data} onAsk={askAbout} />
             </ErrorBoundary>
+          </motion.main>
+          <motion.main
+            className={`min-h-0 min-w-0 flex-1 flex-col overflow-y-auto ${page === "forecast" ? "flex" : "hidden"}`}
+            initial={false}
+            animate={page === "forecast" ? PAGE.shown : PAGE.hidden}
+            aria-label="Forecast"
+          >
+            {/* Loaded on first visit only: the overview stays the first request. */}
+            <ErrorBoundary label="forecast">{(page === "forecast" || seen.forecast) && <ForecastView />}</ErrorBoundary>
           </motion.main>
           <motion.main
             className={`min-h-0 min-w-0 flex-1 flex-col ${page === "ask" ? "flex" : "hidden"}`}
@@ -100,10 +115,11 @@ function MobileNav({ page, onPage, ready }: { page: Page; onPage: (page: Page) =
     <nav className="flex h-14 shrink-0 items-center gap-1 border-b border-line bg-surface px-3 lg:hidden" aria-label="Main">
       <BrandMark size={28} />
       <span className="ml-1.5 mr-auto flex items-center gap-1.5 font-display text-sm font-semibold">
-        MetroMove
+        <span className="hidden min-[420px]:inline">MetroMove</span>
         <span className={`h-2 w-2 rounded-full ${ready ? "bg-good" : "bg-bad"}`} aria-label={ready ? "Assistant ready" : "Assistant offline"} />
       </span>
       {item("overview", <LayoutDashboard size={17} aria-hidden="true" />, "Overview")}
+      {item("forecast", <TrendingUp size={17} aria-hidden="true" />, "Forecast")}
       {item("ask", <MessagesSquare size={17} aria-hidden="true" />, "Ask")}
       {item("reports", <FileBarChart2 size={17} aria-hidden="true" />, "Reports")}
       <a className="btn h-9 px-2.5 text-ink-2 hover:bg-tint" href={config.supersetUrl} target="_blank" rel="noreferrer" aria-label="Dashboards (opens in a new tab)">

@@ -6,12 +6,14 @@ import { useQuery } from "@tanstack/react-query";
 export type RuntimeConfig = {
   supersetUrl: string;
   grafanaUrl: string;
+  mlflowUrl: string;
   showPlatformHealth: boolean;
 };
 
 const DEFAULTS: RuntimeConfig = {
   supersetUrl: "http://localhost:8088",
   grafanaUrl: "http://localhost:3000",
+  mlflowUrl: "http://localhost:5500",
   showPlatformHealth: true,
 };
 

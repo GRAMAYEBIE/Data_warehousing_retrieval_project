@@ -615,3 +615,37 @@ def test_the_overview_is_computed_once_per_publication():
     assert (first["latest_month"], first["previous_month"]) == ("2025-02", "2025-01")
     kpis = first["tables"]["kpis"]
     assert dict(zip(kpis["columns"], kpis["rows"][0], strict=True))["trips_change"] == 10
+
+
+# ------------------------------------------------------------------ forecast page
+def test_the_forecast_page_reads_the_published_run_only():
+    import psycopg
+
+    from assistant import forecast
+
+    class ForecastStore:
+        def __init__(self):
+            self.sql = []
+
+        def query(self, sql, params):
+            self.sql.append(sql)
+            if "ml.current_run" in sql:
+                columns = ["run_id", "data_run", "created_at", "history_months",
+                           "validated_month", "forecast_month", "model", "rounds", "wmape",
+                           "baseline_wmape"]  # fmt: skip
+                return columns, [("r1", "load_2025_05", "2026-11-24", ["2025-05"], "2025-05",
+                                  "2025-06", "lightgbm", 300, 0.208, 0.213)], 1  # fmt: skip
+            assert params["run"] == "r1" and params["month"] == "2025-05-01"
+            return ["borough", "predicted"], [("Manhattan", 1.0)], 1
+
+    store = ForecastStore()
+    page = forecast.compute(store)
+    assert page["available"] and page["run"]["forecast_month"] == "2025-06"
+    assert set(page["tables"]) == {"daily", "zones", "hourly", "last_actual"}
+    assert all("LIMIT" in sql for sql in store.sql[1:] if "forecast_evaluation" not in sql)
+
+    class NoSchema:
+        def query(self, sql, params):
+            raise psycopg.errors.UndefinedTable("relation ml.current_run does not exist")
+
+    assert forecast.compute(NoSchema())["available"] is False

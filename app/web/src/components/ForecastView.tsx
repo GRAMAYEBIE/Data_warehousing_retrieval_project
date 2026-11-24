@@ -1,0 +1,427 @@
+import { useQuery } from "@tanstack/react-query";
+import { motion } from "framer-motion";
+import { ArrowUpRight, CircleAlert, FlaskConical, Gauge, RefreshCw, Target, TrendingUp } from "lucide-react";
+import { type ReactNode, useState } from "react";
+import {
+  Area,
+  Bar,
+  BarChart,
+  CartesianGrid,
+  ComposedChart,
+  Line,
+  ReferenceLine,
+  ResponsiveContainer,
+  Tooltip,
+  type TooltipProps,
+  XAxis,
+  YAxis,
+} from "recharts";
+import { api, type ForecastView as Forecast } from "../api/client";
+import { useConfig } from "../lib/config";
+import { compact, formatValue, monthLabel } from "../lib/format";
+import { useIsDark } from "../lib/theme";
+import { CountUp, rise, spring, stagger } from "./motion";
+import { BarList, INK, Tip } from "./ResultChart";
+
+type Table = Forecast["tables"][string];
+type Score = Forecast["evaluation"][number];
+
+const rowsOf = (t?: Table) => (t ? t.rows.map((r) => Object.fromEntries(t.columns.map((c, i) => [c, r[i]]))) : []);
+const pct = (v?: number | null, digits = 1) => (v === null || v === undefined ? "-" : `${(v * 100).toFixed(digits)} %`);
+const millions = (n: number) => (n >= 1_000_000 ? `${(n / 1_000_000).toFixed(2)}M` : formatValue(Math.round(n), "trips"));
+const BOROUGHS = ["Manhattan", "Queens", "Brooklyn", "Bronx"];
+const TIER_TEXT: Record<string, string> = {
+  high: "High demand (20+ trips an hour)",
+  medium: "Medium (2 to 20 an hour)",
+  low: "Low (0.2 to 2 an hour)",
+  sparse: "Sparse (under 0.2 an hour)",
+};
+
+// The published forecast of recorded trips and how well its model did on the last month.
+// An estimate, shown apart from the governed measures and labelled as such everywhere.
+export default function ForecastView() {
+  const config = useConfig();
+  const ink = useIsDark() ? INK.dark : INK.light;
+  const query = useQuery({ queryKey: ["forecast"], queryFn: api.forecast, staleTime: 5 * 60_000 });
+  const data = query.data;
+
+  if (query.isError || (data && !data.available)) {
+    return (
+      <Shell>
+        <div className="card flex items-start gap-3 p-5">
+          <CircleAlert size={20} className="mt-0.5 shrink-0 text-bad-ink" aria-hidden="true" />
+          <div className="flex-1">
+            <h2 className="text-base font-semibold">No forecast to show</h2>
+            <p className="mt-1 text-sm text-ink-2">{data?.message ?? String(query.error)}</p>
+          </div>
+          <button className="btn-outline" onClick={() => query.refetch()}>
+            <RefreshCw size={15} aria-hidden="true" /> Retry
+          </button>
+        </div>
+      </Shell>
+    );
+  }
+  if (!data?.run) return <Loading />;
+
+  const run = data.run;
+  const month = monthLabel(run.forecast_month);
+  const validated = monthLabel(run.validated_month);
+  const score = (kind: string, name: string) => data.evaluation.find((e) => e.segment_type === kind && e.segment === name);
+  const daily = rowsOf(data.tables.daily);
+  const total = daily.reduce((s, r) => s + Number(r.predicted), 0);
+  const days = new Set(daily.map((r) => r.date_day)).size || 1;
+  const actual = rowsOf(data.tables.last_actual);
+  const actualTotal = actual.reduce((s, r) => s + Number(r.trips), 0);
+  const actualDays = Number(actual[0]?.days ?? 1);
+  const perDayChange = actualTotal ? (total / days / (actualTotal / actualDays) - 1) * 100 : null;
+  const cityDay = score("borough_day", "all");
+  const overall = score("overall", "all");
+  const gain = cityDay?.wmape && cityDay.baseline_wmape ? (1 - cityDay.wmape / cityDay.baseline_wmape) * 100 : null;
+  const zones = rowsOf(data.tables.zones);
+
+  return (
+    <Shell>
+      <header className="flex flex-col gap-4 sm:flex-row sm:items-end">
+        <div className="min-w-0 flex-1">
+          <div className="label flex flex-wrap items-center gap-2">
+            Forecast
+            <span className="chip border-accent/40 bg-accent/15 normal-case tracking-normal text-ink">Estimate · not a measured figure</span>
+          </div>
+          <h1 className="mt-1 text-[30px] font-semibold leading-tight sm:text-[34px]">{month} demand forecast</h1>
+          <p className="mt-1.5 max-w-3xl text-sm text-ink-2">
+            Recorded trips expected for every pickup zone and hour. Trained on {monthLabel(run.history_months[0])} to{" "}
+            {monthLabel(run.history_months[run.history_months.length - 1])} (publication{" "}
+            <span className="font-mono text-xs">{run.data_run}</span>), checked on {validated} against a simple baseline.
+          </p>
+        </div>
+        <a className="btn-outline self-start sm:self-auto" href={`${config.mlflowUrl}/#/models/demand_forecast`} target="_blank" rel="noreferrer">
+          <FlaskConical size={16} aria-hidden="true" /> Open in MLflow <ArrowUpRight size={14} aria-hidden="true" />
+        </a>
+      </header>
+
+      <motion.section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4" variants={stagger} initial="hidden" animate="show" aria-label="Key figures">
+        <Tile icon={<TrendingUp size={16} />} label={`Expected trips, ${month}`}>
+          <CountUp value={total} format={millions} />
+          <Note>
+            {perDayChange !== null && (
+              <>
+                <span className="num">{perDayChange >= 0 ? "+" : ""}{perDayChange.toFixed(1)} %</span> a day vs {validated}
+              </>
+            )}
+          </Note>
+        </Tile>
+        <Tile icon={<Target size={16} />} label="Error per borough and day">
+          <CountUp value={(cityDay?.wmape ?? 0) * 100} format={(n) => `${n.toFixed(1)} %`} />
+          <Note>
+            baseline {pct(cityDay?.baseline_wmape)}
+            {gain !== null && <span className="font-medium text-good-ink"> · {gain.toFixed(0)} % better</span>}
+          </Note>
+        </Tile>
+        <Tile icon={<Gauge size={16} />} label="80 % range held the actual">
+          <CountUp value={(overall?.coverage_80 ?? 0) * 100} format={(n) => `${n.toFixed(1)} %`} />
+          <Note>of the zone-hours of {validated} (aim: 80 %)</Note>
+        </Tile>
+        <Tile icon={<TrendingUp size={16} />} label="Busiest zone expected">
+          <span className="block text-[24px] leading-tight">{String(zones[0]?.zone_name ?? "-")}</span>
+          <Note>
+            <span className="num">{millions(Number(zones[0]?.predicted ?? 0))}</span> trips, {String(zones[0]?.borough ?? "")}
+          </Note>
+        </Tile>
+      </motion.section>
+
+      <Panel title="Trips per day" subtitle={`${month}, with the 80 % range · dashed: the daily average of ${validated}`}>
+        <Daily rows={daily} actual={actual} ink={ink} />
+      </Panel>
+
+      <div className="grid gap-4 lg:grid-cols-5">
+        <Panel className="lg:col-span-3" title={`Accuracy on ${validated}`} subtitle="Error = share of trips missed or over-counted (WMAPE). Lower is better.">
+          <Accuracy scores={data.evaluation} days={actualDays} />
+        </Panel>
+        <Panel className="lg:col-span-2" title="Busiest pickup zones" subtitle={`Expected trips, ${month}`}>
+          <BarList unit="trips" colors={ink} rows={zones.map((z) => ({ key: String(z.zone_name), value: Math.round(Number(z.predicted)) }))} />
+        </Panel>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-5">
+        <Panel className="lg:col-span-3" title="An average day, hour by hour" subtitle={`Expected trips per hour, city-wide, ${month}`}>
+          <Hourly table={data.tables.hourly} ink={ink} />
+        </Panel>
+        <Panel className="lg:col-span-2" title="How this forecast is made" subtitle="Rules applied to every run">
+          <Method validated={validated} runId={run.run_id} rounds={run.rounds} />
+        </Panel>
+      </div>
+    </Shell>
+  );
+}
+
+function Shell({ children }: { children: ReactNode }) {
+  return <div className="mx-auto w-full max-w-[1180px] space-y-5 px-4 py-7 sm:px-6 lg:py-9">{children}</div>;
+}
+
+function Tile({ icon, label, children }: { icon: ReactNode; label: string; children: ReactNode }) {
+  return (
+    <motion.div variants={rise} className="card lift p-5">
+      <div className="flex items-center gap-2 text-sm font-medium text-ink-2">
+        <span className="text-primary-strong" aria-hidden="true">
+          {icon}
+        </span>
+        {label}
+      </div>
+      <div className="num mt-1.5 font-display text-[34px] font-semibold leading-tight tracking-tight text-ink">{children}</div>
+    </motion.div>
+  );
+}
+
+function Note({ children }: { children: ReactNode }) {
+  return <div className="mt-1.5 font-sans text-xs font-normal tracking-normal text-ink-3">{children}</div>;
+}
+
+function Panel({ title, subtitle, className = "", children }: { title: string; subtitle: string; className?: string; children: ReactNode }) {
+  return (
+    <motion.section
+      className={`card flex flex-col p-5 ${className}`}
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.4, delay: 0.15, ease: [0.22, 1, 0.36, 1] }}
+      aria-label={title}
+    >
+      <header className="mb-4">
+        <h2 className="text-base font-semibold">{title}</h2>
+        <p className="text-xs text-ink-3">{subtitle}</p>
+      </header>
+      <div className="flex flex-1 flex-col">{children}</div>
+    </motion.section>
+  );
+}
+
+type Ink = (typeof INK)["light"];
+
+function Daily({ rows, actual, ink }: { rows: Record<string, unknown>[]; actual: Record<string, unknown>[]; ink: Ink }) {
+  const [borough, setBorough] = useState("Manhattan");
+  const points = rows
+    .filter((r) => r.borough === borough)
+    .map((r) => {
+      const day = new Date(`${r.date_day}T00:00:00`);
+      return {
+        day: day.toLocaleDateString("en-GB", { day: "numeric", month: "short" }),
+        weekday: day.toLocaleDateString("en-GB", { weekday: "short" }),
+        predicted: Number(r.predicted),
+        range: [Number(r.lower), Number(r.upper)] as [number, number],
+      };
+    });
+  const past = actual.find((a) => a.borough === borough);
+  const pastAverage = past ? Number(past.trips) / Number(past.days) : undefined;
+  return (
+    <div className="flex h-full flex-col">
+      <div className="mb-3 inline-flex self-start rounded-input bg-tint p-1" role="tablist" aria-label="Borough">
+        {BOROUGHS.map((b) => (
+          <button
+            key={b}
+            role="tab"
+            aria-selected={borough === b}
+            onClick={() => setBorough(b)}
+            className={`relative rounded-[8px] px-3 py-1 text-xs font-medium transition-colors ${borough === b ? "text-ink" : "text-ink-2 hover:text-ink"}`}
+          >
+            {borough === b && <motion.span layoutId="forecast-borough" className="absolute inset-0 rounded-[8px] bg-surface shadow-soft" transition={spring} />}
+            <span className="relative">{b}</span>
+          </button>
+        ))}
+      </div>
+      <div className="h-[280px] w-full">
+        <ResponsiveContainer>
+          <ComposedChart key={borough} data={points} margin={{ top: 10, right: 14, left: 0, bottom: 0 }}>
+            <CartesianGrid stroke={ink.grid} vertical={false} />
+            <XAxis dataKey="day" tick={{ fontSize: 12, fill: ink.axis }} axisLine={false} tickLine={false} interval="preserveStartEnd" minTickGap={24} />
+            <YAxis tickFormatter={(v: number) => compact(v)} tick={{ fontSize: 12, fill: ink.axis }} width={52} axisLine={false} tickLine={false} />
+            <Tooltip content={<DayTip />} cursor={{ stroke: ink.axis, strokeDasharray: "3 3" }} />
+            <Area dataKey="range" stroke="none" fill={ink.series[0]} fillOpacity={0.14} isAnimationActive animationDuration={700} />
+            {pastAverage !== undefined && (
+              <ReferenceLine y={pastAverage} stroke={ink.axis} strokeDasharray="4 4" ifOverflow="extendDomain" />
+            )}
+            <Line dataKey="predicted" stroke={ink.series[0]} strokeWidth={2} dot={false} activeDot={{ r: 4, strokeWidth: 2, stroke: "rgb(var(--surface))" }} animationDuration={800} />
+          </ComposedChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+}
+
+function DayTip({ active, payload }: TooltipProps<number, string>) {
+  if (!active || !payload?.length) return null;
+  const p = payload[0].payload as { day: string; weekday: string; predicted: number; range: [number, number] };
+  return (
+    <div className="rounded-lg border border-line bg-surface px-3 py-2 text-xs shadow-raised">
+      <div className="mb-1 font-medium text-ink">
+        {p.weekday} {p.day}
+      </div>
+      <div className="num text-ink">{formatValue(Math.round(p.predicted), "trips")} trips expected</div>
+      <div className="num text-ink-3">
+        80 % range {formatValue(Math.round(p.range[0]), "trips")} to {formatValue(Math.round(p.range[1]), "trips")}
+      </div>
+    </div>
+  );
+}
+
+function Accuracy({ scores, days }: { scores: Score[]; days: number }) {
+  const boroughs = scores.filter((s) => s.segment_type === "borough_day" && s.segment !== "all");
+  const tiers = ["high", "medium", "low", "sparse"]
+    .map((t) => scores.find((s) => s.segment_type === "tier" && s.segment === t))
+    .filter((s): s is Score => Boolean(s));
+  const max = Math.max(0.01, ...boroughs.flatMap((s) => [s.wmape ?? 0, s.baseline_wmape ?? 0]));
+  return (
+    <div className="space-y-5">
+      <div>
+        <div className="mb-2 flex items-center gap-4 text-xs text-ink-3">
+          <Legend className="bg-primary" text="Model" />
+          <Legend className="bg-line-strong" text="Seasonal baseline (same weekday and hour, last 4 weeks)" />
+        </div>
+        <ul className="space-y-2.5">
+          {boroughs.map((s) => {
+            const better = (s.wmape ?? 1) < (s.baseline_wmape ?? 0);
+            return (
+              <li key={s.segment}>
+                <div className="flex items-baseline gap-3 text-sm">
+                  <span className="min-w-0 flex-1 truncate text-ink-2">{s.segment}</span>
+                  <span className={`num text-xs ${better ? "text-good-ink" : "text-bad-ink"}`}>{better ? "better" : "worse"}</span>
+                  <span className="num w-16 text-right font-medium text-ink">{pct(s.wmape)}</span>
+                  <span className="num w-16 text-right text-ink-3">{pct(s.baseline_wmape)}</span>
+                </div>
+                <div className="mt-1 space-y-1">
+                  <Track width={(100 * (s.wmape ?? 0)) / max} className="bg-primary" />
+                  <Track width={(100 * (s.baseline_wmape ?? 0)) / max} className="bg-line-strong" thin />
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      </div>
+      <div>
+        <h3 className="mb-2 text-sm font-semibold">By demand level of the zone (per zone and hour)</h3>
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-xs text-ink-3">
+              <th className="pb-1.5 font-medium">Zones</th>
+              <th className="pb-1.5 text-right font-medium">Model</th>
+              <th className="pb-1.5 text-right font-medium">Baseline</th>
+            </tr>
+          </thead>
+          <tbody>
+            {tiers.map((s) => (
+              <tr key={s.segment} className="border-t border-line">
+                <td className="py-1.5 text-ink-2">
+                  {TIER_TEXT[s.segment] ?? s.segment}
+                  <span className="num text-ink-3"> · {Math.round(s.rows / (days * 24))} zones</span>
+                  {s.segment === "sparse" && <span className="chip ml-2 border-accent/40 bg-accent/15 text-ink">low confidence</span>}
+                </td>
+                <td className="num whitespace-nowrap py-1.5 pl-2 text-right font-medium">{pct(s.wmape, 0)}</td>
+                <td className="num whitespace-nowrap py-1.5 pl-2 text-right text-ink-3">{pct(s.baseline_wmape, 0)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <p className="mt-2 text-xs leading-5 text-ink-3">
+          Quiet zones have many hours with no trip, so their error per hour is large for any method; they are scored apart and their
+          forecasts are flagged, never hidden in an average.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function Legend({ className, text }: { className: string; text: string }) {
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span className={`h-2 w-2 rounded-full ${className}`} />
+      {text}
+    </span>
+  );
+}
+
+function Track({ width, className, thin }: { width: number; className: string; thin?: boolean }) {
+  return (
+    <div className={`overflow-hidden rounded-full bg-tint ${thin ? "h-1" : "h-1.5"}`}>
+      <motion.div
+        className={`h-full rounded-full ${className}`}
+        initial={{ width: 0 }}
+        animate={{ width: `${Math.max(1, width)}%` }}
+        transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
+      />
+    </div>
+  );
+}
+
+function Hourly({ table, ink }: { table?: Table; ink: Ink }) {
+  const points = rowsOf(table).map((r) => ({ label: `${String(r.pickup_hour).padStart(2, "0")}:00`, value: Math.round(Number(r.predicted)) }));
+  const peak = points.reduce((a, b) => (b.value > a.value ? b : a), points[0] ?? { label: "-", value: 0 });
+  return (
+    <div className="flex h-full flex-col">
+      <p className="mb-3 text-sm text-ink-2">
+        Busiest expected hour: <span className="font-semibold text-ink">{peak.label}</span> (
+        <span className="num">{formatValue(peak.value, "trips")}</span> trips on an average day).
+      </p>
+      <div className="min-h-[220px] w-full flex-1">
+        <ResponsiveContainer>
+          <BarChart data={points} margin={{ top: 4, right: 6, left: 0, bottom: 0 }} barCategoryGap="16%">
+            <CartesianGrid stroke={ink.grid} vertical={false} />
+            <XAxis dataKey="label" tick={{ fontSize: 12, fill: ink.axis }} axisLine={false} tickLine={false} interval="preserveStartEnd" minTickGap={18} />
+            <YAxis tickFormatter={(v: number) => compact(v)} tick={{ fontSize: 12, fill: ink.axis }} width={48} axisLine={false} tickLine={false} />
+            <Tooltip content={<Tip unit="trips" />} cursor={{ fill: ink.grid, opacity: 0.6 }} />
+            <Bar dataKey="value" name="Expected trips" fill={ink.series[0]} fillOpacity={0.75} radius={[4, 4, 0, 0]} animationDuration={700} />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+}
+
+function Method({ validated, runId, rounds }: { validated: string; runId: string; rounds: number }) {
+  const items: [string, string][] = [
+    ["Tested on unseen data", `The model learns from earlier months only and is scored on ${validated}, a month it never saw. Never a random split.`],
+    ["A baseline to beat", "Each forecast is compared with the same weekday and hour over the last four weeks. A model that does not beat it is not published."],
+    ["Imbalance taken into account", "Errors are measured per borough and per demand level, weighted by trips, so the busy Manhattan zones cannot hide the rest."],
+    ["What it predicts", "Recorded trips, not total need: a ride that could not find a taxi leaves no trace in the data."],
+  ];
+  return (
+    <div className="space-y-3">
+      <ol className="space-y-3">
+        {items.map(([title, text], i) => (
+          <li key={title} className="flex gap-3">
+            <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-primary/10 text-xs font-semibold text-primary-strong">{i + 1}</span>
+            <div>
+              <div className="text-sm font-medium text-ink">{title}</div>
+              <p className="text-xs leading-5 text-ink-2">{text}</p>
+            </div>
+          </li>
+        ))}
+      </ol>
+      <p className="border-t border-line pt-3 text-xs leading-5 text-ink-3">
+        Gradient-boosted trees (LightGBM, {rounds} trees) for the expected value and the 80 % range. Run{" "}
+        <code className="font-mono">{runId.slice(0, 12)}</code> in MLflow holds its data version, settings, scores and model.
+      </p>
+    </div>
+  );
+}
+
+function Loading() {
+  return (
+    <Shell>
+      <div className="space-y-2">
+        <div className="skeleton h-4 w-24" />
+        <div className="skeleton h-9 w-80" />
+        <div className="skeleton h-4 w-[28rem] max-w-full" />
+      </div>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        {[0, 1, 2, 3].map((i) => (
+          <div key={i} className="card space-y-3 p-5">
+            <div className="skeleton h-4 w-28" />
+            <div className="skeleton h-9 w-32" />
+            <div className="skeleton h-4 w-40" />
+          </div>
+        ))}
+      </div>
+      <div className="card h-[360px] p-5">
+        <div className="skeleton h-full w-full" />
+      </div>
+    </Shell>
+  );
+}

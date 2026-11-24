@@ -107,6 +107,43 @@ class OverviewView(Contract):
     tables: dict[str, OverviewTable]  # kpis, trend, boroughs, zones, hourly
 
 
+class ForecastRun(Contract):
+    run_id: str  # MLflow run id
+    data_run: str  # publication the model was trained on
+    created_at: str
+    history_months: list[str]
+    validated_month: str
+    forecast_month: str
+    model: str
+    rounds: int
+    wmape: float | None
+    baseline_wmape: float | None
+
+
+class ForecastScore(Contract):
+    segment_type: str  # overall, borough, tier, borough_day
+    segment: str
+    rows: int
+    actual_trips: float
+    mae: float | None
+    wmape: float | None
+    bias: float | None
+    baseline_mae: float | None
+    baseline_wmape: float | None
+    coverage_80: float | None
+
+
+class ForecastView(Contract):
+    """The published demand forecast (an estimate, never a governed measure)."""
+
+    available: bool
+    message: str | None = None
+    run: ForecastRun | None = None
+    evaluation: list[ForecastScore] = Field(default_factory=list)
+    # daily, zones, hourly, last_actual
+    tables: dict[str, OverviewTable] = Field(default_factory=dict)
+
+
 class Rejection(Contract):
     """Body of a 422: the request was refused, with the reasons."""
 

@@ -21,6 +21,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/forecast": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Forecast
+         * @description The published demand forecast, its evaluation and run (written by the ml job).
+         */
+        get: operations["forecast_forecast_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/health": {
         parameters: {
             query?: never;
@@ -329,6 +349,69 @@ export interface components {
             /** Values */
             values: (string | number | boolean)[];
         };
+        /** ForecastRun */
+        ForecastRun: {
+            /** Baseline Wmape */
+            baseline_wmape: number | null;
+            /** Created At */
+            created_at: string;
+            /** Data Run */
+            data_run: string;
+            /** Forecast Month */
+            forecast_month: string;
+            /** History Months */
+            history_months: string[];
+            /** Model */
+            model: string;
+            /** Rounds */
+            rounds: number;
+            /** Run Id */
+            run_id: string;
+            /** Validated Month */
+            validated_month: string;
+            /** Wmape */
+            wmape: number | null;
+        };
+        /** ForecastScore */
+        ForecastScore: {
+            /** Actual Trips */
+            actual_trips: number;
+            /** Baseline Mae */
+            baseline_mae: number | null;
+            /** Baseline Wmape */
+            baseline_wmape: number | null;
+            /** Bias */
+            bias: number | null;
+            /** Coverage 80 */
+            coverage_80: number | null;
+            /** Mae */
+            mae: number | null;
+            /** Rows */
+            rows: number;
+            /** Segment */
+            segment: string;
+            /** Segment Type */
+            segment_type: string;
+            /** Wmape */
+            wmape: number | null;
+        };
+        /**
+         * ForecastView
+         * @description The published demand forecast (an estimate, never a governed measure).
+         */
+        ForecastView: {
+            /** Available */
+            available: boolean;
+            /** Evaluation */
+            evaluation: components["schemas"]["ForecastScore"][];
+            /** Message */
+            message: string | null;
+            run: components["schemas"]["ForecastRun"] | null;
+            /** Tables */
+            tables: {
+                [key: string]: components["schemas"]["OverviewTable"];
+            };
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -632,6 +715,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CatalogView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    forecast_forecast_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ForecastView"];
                 };
             };
             /** @description Validation Error */

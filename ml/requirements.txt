@@ -1,0 +1,8 @@
+# Pinned runtime and dev dependencies of the forecasting image (reproducible builds).
+lightgbm==4.6.0
+numpy==2.3.5
+pandas==2.3.3
+psycopg[binary]==3.3.9
+mlflow-skinny==3.17.2
+pytest==9.2.0
+ruff==0.17.5

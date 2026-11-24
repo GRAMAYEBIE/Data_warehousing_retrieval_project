@@ -21,6 +21,7 @@ from assistant import telemetry
 from assistant.api_models import (
     CatalogView,
     DimensionInfo,
+    ForecastView,
     Health,
     OverviewView,
     Rejection,
@@ -136,6 +137,17 @@ def overview() -> OverviewView:
         return OverviewView.model_validate(page.compute(get_assistant()))
     except Exception as exc:  # noqa: BLE001 - the page reports the failure, the API stays up
         raise HTTPException(503, f"overview unavailable: {type(exc).__name__}") from exc
+
+
+@app.get("/forecast", dependencies=[Depends(authorised)])
+def forecast() -> ForecastView:
+    """The published demand forecast, its evaluation and run (written by the ml job)."""
+    from assistant import forecast as page
+
+    try:
+        return ForecastView.model_validate(page.compute(get_assistant().store))
+    except Exception as exc:  # noqa: BLE001 - the page reports the failure, the API stays up
+        raise HTTPException(503, f"forecast unavailable: {type(exc).__name__}") from exc
 
 
 @app.post("/sessions", dependencies=[Depends(authorised)])
