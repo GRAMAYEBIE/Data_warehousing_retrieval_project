@@ -6,6 +6,7 @@ import {
   CarTaxiFront,
   FileBarChart2,
   Laptop,
+  LayoutDashboard,
   Lock,
   MessagesSquare,
   Moon,
@@ -18,7 +19,7 @@ import { DATA_OWNER } from "../lib/measures";
 import { type Theme, useTheme } from "../lib/theme";
 import { spring } from "./motion";
 
-export type Page = "ask" | "reports";
+export type Page = "overview" | "ask" | "reports";
 
 export function BrandMark({ size = 32 }: { size?: number }) {
   return (
@@ -52,7 +53,11 @@ export default function Sidebar({ page, onPage, health, catalog }: Props) {
       </div>
 
       <nav className="mt-2 flex flex-col gap-0.5 px-3" aria-label="Main">
-        <div className="label px-2.5 pb-1.5 pt-2">Assistant</div>
+        <div className="label px-2.5 pb-1.5 pt-2">Insights</div>
+        <NavItem active={page === "overview"} onClick={() => onPage("overview")} icon={<LayoutDashboard size={16} />}>
+          Overview
+        </NavItem>
+        <div className="label px-2.5 pb-1.5 pt-5">Assistant</div>
         <NavItem active={page === "ask"} onClick={() => onPage("ask")} icon={<MessagesSquare size={16} />}>
           Ask a question
         </NavItem>

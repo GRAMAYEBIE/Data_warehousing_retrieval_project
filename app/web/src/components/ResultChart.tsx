@@ -17,7 +17,7 @@ import { useIsDark } from "../lib/theme";
 // Chart colours by role. SVG attributes cannot read CSS variables, so the two themes are
 // spelled out here with the same values as src/index.css (palette validated for colour
 // vision deficiencies on both surfaces).
-const INK = {
+export const INK = {
   light: { series: ["#1f7ae0", "#eb6834", "#1baf7a"], muted: "#c5d3e3", grid: "#e3ecf5", axis: "#5f6f85", label: "#5b6b80" },
   dark: { series: ["#4c9af0", "#d95926", "#199e70"], muted: "#3a4c66", grid: "#212f45", axis: "#8c9db5", label: "#a0b0c6" },
 };
@@ -119,7 +119,7 @@ type BarRow = { key: string; value: number | null; previous?: number | null };
 
 // Ranked categories as an HTML bar list: the full name stays readable (truncated with its
 // full text on hover), values align right in tabular figures, bars share one scale.
-function BarList({
+export function BarList({
   rows,
   unit,
   colors,
@@ -200,7 +200,7 @@ function Swatch({ color, text }: { color: string; text: string }) {
   );
 }
 
-function Tip({ active, payload, label, unit }: TooltipProps<number, string> & { unit: string }) {
+export function Tip({ active, payload, label, unit }: TooltipProps<number, string> & { unit: string }) {
   if (!active || !payload?.length) return null;
   return (
     <div className="rounded-lg border border-line bg-surface px-3 py-2 text-xs shadow-raised">

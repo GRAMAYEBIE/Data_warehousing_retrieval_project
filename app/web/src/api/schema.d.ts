@@ -38,6 +38,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Overview
+         * @description The key figures of the latest month, computed like an answer but without the model.
+         */
+        get: operations["overview_overview_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/reports": {
         parameters: {
             query?: never;
@@ -379,6 +399,41 @@ export interface components {
          * @enum {string}
          */
         Operator: "=" | "!=" | "in" | "not in";
+        /** OverviewTable */
+        OverviewTable: {
+            /** Columns */
+            columns: string[];
+            /** Rows */
+            rows: unknown[][];
+            /** Sql */
+            sql: string;
+        };
+        /**
+         * OverviewView
+         * @description Key figures of the latest published month, from the governed path without the model.
+         */
+        OverviewView: {
+            /** Latest Month */
+            latest_month: string | null;
+            /** Measures */
+            measures: {
+                [key: string]: string;
+            };
+            /** Previous Month */
+            previous_month: string | null;
+            /** Previous Valid Trip Rate */
+            previous_valid_trip_rate: number | null;
+            /** Published At */
+            published_at: string;
+            /** Published Run */
+            published_run: string;
+            /** Tables */
+            tables: {
+                [key: string]: components["schemas"]["OverviewTable"];
+            };
+            /** Valid Trip Rate */
+            valid_trip_rate: number | null;
+        };
         /**
          * Period
          * @enum {string}
@@ -606,6 +661,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Health"];
+                };
+            };
+        };
+    };
+    overview_overview_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OverviewView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

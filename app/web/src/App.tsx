@@ -1,12 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { BarChart3, FileBarChart2, MessagesSquare } from "lucide-react";
+import { BarChart3, FileBarChart2, LayoutDashboard, MessagesSquare } from "lucide-react";
 import { useState } from "react";
 import { api } from "./api/client";
 import AskView from "./components/AskView";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { MeasuresDrawer, MeasuresList } from "./components/MeasuresPanel";
 import { ease } from "./components/motion";
+import OverviewView from "./components/OverviewView";
 import ReportBuilder from "./components/ReportBuilder";
 import Sidebar, { BrandMark, type Page, ThemeSwitch } from "./components/Sidebar";
 import { useConfig } from "./lib/config";
@@ -18,7 +19,7 @@ const PAGE = {
 };
 
 export default function App() {
-  const [page, setPage] = useState<Page>("ask");
+  const [page, setPage] = useState<Page>("overview");
   const [measuresOpen, setMeasuresOpen] = useState(false);
   const [injected, setInjected] = useState<{ text: string; nonce: number }>();
   const health = useQuery({ queryKey: ["health"], queryFn: api.health, refetchInterval: 30_000 });
@@ -34,7 +35,17 @@ export default function App() {
       <div className="flex min-w-0 flex-1 flex-col">
         <MobileNav page={page} onPage={setPage} ready={health.data?.status === "ok" && Boolean(health.data?.model_available)} />
         <div className="flex min-h-0 flex-1">
-          {/* Both pages stay mounted: switching page never loses a conversation or a draft. */}
+          {/* Every page stays mounted: switching page never loses a conversation or a draft. */}
+          <motion.main
+            className={`min-h-0 min-w-0 flex-1 flex-col overflow-y-auto ${page === "overview" ? "flex" : "hidden"}`}
+            initial={false}
+            animate={page === "overview" ? PAGE.shown : PAGE.hidden}
+            aria-label="Overview"
+          >
+            <ErrorBoundary label="overview">
+              <OverviewView catalog={catalog.data} onAsk={askAbout} />
+            </ErrorBoundary>
+          </motion.main>
           <motion.main
             className={`min-h-0 min-w-0 flex-1 flex-col ${page === "ask" ? "flex" : "hidden"}`}
             initial={false}
@@ -92,6 +103,7 @@ function MobileNav({ page, onPage, ready }: { page: Page; onPage: (page: Page) =
         MetroMove
         <span className={`h-2 w-2 rounded-full ${ready ? "bg-good" : "bg-bad"}`} aria-label={ready ? "Assistant ready" : "Assistant offline"} />
       </span>
+      {item("overview", <LayoutDashboard size={17} aria-hidden="true" />, "Overview")}
       {item("ask", <MessagesSquare size={17} aria-hidden="true" />, "Ask")}
       {item("reports", <FileBarChart2 size={17} aria-hidden="true" />, "Reports")}
       <a className="btn h-9 px-2.5 text-ink-2 hover:bg-tint" href={config.supersetUrl} target="_blank" rel="noreferrer" aria-label="Dashboards (opens in a new tab)">

@@ -535,6 +535,119 @@
     "title": "Operator",
     "type": "string"
    },
+   "OverviewTable": {
+    "properties": {
+     "columns": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Columns",
+      "type": "array"
+     },
+     "rows": {
+      "items": {
+       "items": {},
+       "type": "array"
+      },
+      "title": "Rows",
+      "type": "array"
+     },
+     "sql": {
+      "title": "Sql",
+      "type": "string"
+     }
+    },
+    "required": [
+     "columns",
+     "rows",
+     "sql"
+    ],
+    "title": "OverviewTable",
+    "type": "object"
+   },
+   "OverviewView": {
+    "description": "Key figures of the latest published month, from the governed path without the model.",
+    "properties": {
+     "latest_month": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Latest Month"
+     },
+     "measures": {
+      "additionalProperties": {
+       "type": "string"
+      },
+      "title": "Measures",
+      "type": "object"
+     },
+     "previous_month": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Previous Month"
+     },
+     "previous_valid_trip_rate": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Previous Valid Trip Rate"
+     },
+     "published_at": {
+      "title": "Published At",
+      "type": "string"
+     },
+     "published_run": {
+      "title": "Published Run",
+      "type": "string"
+     },
+     "tables": {
+      "additionalProperties": {
+       "$ref": "#/components/schemas/OverviewTable"
+      },
+      "title": "Tables",
+      "type": "object"
+     },
+     "valid_trip_rate": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Valid Trip Rate"
+     }
+    },
+    "required": [
+     "latest_month",
+     "previous_month",
+     "published_run",
+     "published_at",
+     "valid_trip_rate",
+     "previous_valid_trip_rate",
+     "measures",
+     "tables"
+    ],
+    "title": "OverviewView",
+    "type": "object"
+   },
    "Period": {
     "enum": [
      "latest_month",
@@ -1082,6 +1195,47 @@
      }
     },
     "summary": "Health"
+   }
+  },
+  "/overview": {
+   "get": {
+    "description": "The key figures of the latest month, computed like an answer but without the model.",
+    "operationId": "overview_overview_get",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "authorization",
+      "required": false,
+      "schema": {
+       "default": "",
+       "title": "Authorization",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OverviewView"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Overview"
    }
   },
   "/reports": {

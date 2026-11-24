@@ -4,10 +4,23 @@ server {
     listen 80;
     root /usr/share/nginx/html;
 
+    # Compressed responses: the application bundle is about three times smaller, which
+    # matters on a remote or relayed connection. Streamed answers are left uncompressed.
+    gzip on;
+    gzip_comp_level 5;
+    gzip_min_length 1024;
+    gzip_types text/css application/javascript application/json image/svg+xml;
+
+    # Service names are resolved per request (Docker DNS): a restarted container gets a
+    # new address, and the interface follows it without a restart of its own.
+    resolver 127.0.0.11 valid=30s ipv6=off;
+
     # The browser calls /api/...; nginx adds the bearer token, so it never reaches the
     # browser. Answers can take minutes on a CPU host: long timeouts.
     location /api/ {
-        proxy_pass http://${API_UPSTREAM}/;
+        set $api_upstream ${API_UPSTREAM};
+        rewrite ^/api/(.*)$ /$1 break;
+        proxy_pass http://$api_upstream;
         proxy_set_header Authorization "Bearer ${API_TOKEN}";
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_read_timeout 1800s;
@@ -18,11 +31,10 @@ server {
         proxy_buffering off;
     }
 
-    # Microphone: the recorded question goes to the local speech-to-text service. The
-    # service name is resolved per request (Docker DNS), so the interface still starts
-    # when the speech service is not running; the button then reports it unavailable.
+    # Microphone: the recorded question goes to the local speech-to-text service. Resolved
+    # per request too, so the interface still starts when the speech service is not
+    # running; the button then reports it unavailable.
     location /speech/ {
-        resolver 127.0.0.11 valid=30s ipv6=off;
         set $speech_upstream ${SPEECH_UPSTREAM};
         rewrite ^/speech/(.*)$ /$1 break;
         proxy_pass http://$speech_upstream;
