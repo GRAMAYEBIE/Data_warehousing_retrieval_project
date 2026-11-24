@@ -7,6 +7,7 @@ query failure, empty results, follow-ups, the SQL guard and the narrative number
 
 from __future__ import annotations
 
+import dataclasses
 import json
 
 import pytest
@@ -551,3 +552,66 @@ def test_progress_events_report_each_step_and_the_text_as_it_is_written():
     )
     text = "".join(e["text"] for e in events if e["type"] == "token")
     assert text.strip() == answer.narrative and answer.status == "answered"
+
+
+# ------------------------------------------------------------------ overview page
+# The Overview's headline measures, with their definitions in the published catalogue.
+OVERVIEW_CATALOG = dataclasses.replace(
+    CATALOG,
+    metrics={
+        **METRICS,
+        "avg_fare": {
+            **METRICS["trips"],
+            "label": "Average fare",
+            "unit": "USD per trip",
+            "sql_expression": "sum(sum_fare_amount) filter (where quality_status = 'valid') / "
+            "nullif(sum(trip_count) filter (where quality_status = 'valid'), 0)",
+        },
+        "tip_rate": {
+            **METRICS["trips"],
+            "label": "Tip rate (card trips)",
+            "unit": "ratio",
+            "sql_expression": "sum(sum_tip_amount_recorded) filter (where quality_status = "
+            "'valid') / nullif(sum(sum_fare_amount_tip_recorded) filter "
+            "(where quality_status = 'valid'), 0)",
+        },
+    },
+)
+
+
+def test_every_overview_plan_is_governed_and_builds_a_query():
+    from assistant import overview
+    from assistant.resolver import build
+
+    for name, p in overview.PLANS.items():
+        resolved = validate(p.model_copy(deep=True), OVERVIEW_CATALOG)
+        built = build(resolved, OVERVIEW_CATALOG, 500)
+        assert built.sql and "analytics" in built.sql.lower(), name
+    assert overview.PLANS["kpis"].compare_to == "previous_period"
+
+
+def test_the_overview_is_computed_once_per_publication():
+    from assistant import overview
+
+    class CountingStore(FakeStore):
+        queries = 0
+
+        def query(self, sql, params):
+            CountingStore.queries += 1
+            if "period_role" in sql:  # the month against the month before
+                columns = ["period_role", "trips", "total_revenue", "avg_fare", "tip_rate"]
+                rows = [["current", 110, 2200.0, 18.5, 0.21], ["previous", 100, 2000.0, 18.0, 0.2]]
+                return columns, rows, 5
+            return super().query(sql, params)
+
+    a = assistant(store=CountingStore(["trips"], [[1]]))
+    a._catalog = OVERVIEW_CATALOG
+    overview._cache.clear()
+    first = overview.compute(a)
+    after_first = CountingStore.queries
+    assert overview.compute(a) is first and CountingStore.queries == after_first == 5
+    assert first["published_run"] == CATALOG.published_run
+    assert set(first["tables"]) == {"kpis", "trend", "boroughs", "zones", "hourly"}
+    assert (first["latest_month"], first["previous_month"]) == ("2025-02", "2025-01")
+    kpis = first["tables"]["kpis"]
+    assert dict(zip(kpis["columns"], kpis["rows"][0], strict=True))["trips_change"] == 10

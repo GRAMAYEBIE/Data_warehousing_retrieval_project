@@ -22,6 +22,7 @@ from assistant.api_models import (
     CatalogView,
     DimensionInfo,
     Health,
+    OverviewView,
     Rejection,
     ReportPreview,
     ReportView,
@@ -124,6 +125,17 @@ def catalog() -> CatalogView:
         published_run=cat.published_run,
         published_at=cat.published_at,
     )
+
+
+@app.get("/overview", dependencies=[Depends(authorised)])
+def overview() -> OverviewView:
+    """The key figures of the latest month, computed like an answer but without the model."""
+    from assistant import overview as page
+
+    try:
+        return OverviewView.model_validate(page.compute(get_assistant()))
+    except Exception as exc:  # noqa: BLE001 - the page reports the failure, the API stays up
+        raise HTTPException(503, f"overview unavailable: {type(exc).__name__}") from exc
 
 
 @app.post("/sessions", dependencies=[Depends(authorised)])

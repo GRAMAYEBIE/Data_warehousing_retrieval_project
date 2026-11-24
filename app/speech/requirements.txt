@@ -2,3 +2,5 @@
 fastapi==0.118.0
 uvicorn[standard]==0.37.0
 faster-whisper==1.2.1
+# Audio decoding used by faster-whisper; PyAV 16 removed an argument it still passes.
+av==15.1.0

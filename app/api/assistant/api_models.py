@@ -88,6 +88,25 @@ class ReportView(Contract):
     next_step: str
 
 
+class OverviewTable(Contract):
+    columns: list[str]
+    rows: list[list[Any]]
+    sql: str
+
+
+class OverviewView(Contract):
+    """Key figures of the latest published month, from the governed path without the model."""
+
+    latest_month: str | None
+    previous_month: str | None
+    published_run: str
+    published_at: str
+    valid_trip_rate: float | None
+    previous_valid_trip_rate: float | None
+    measures: dict[str, str]  # headline measures and their labels
+    tables: dict[str, OverviewTable]  # kpis, trend, boroughs, zones, hourly
+
+
 class Rejection(Contract):
     """Body of a 422: the request was refused, with the reasons."""
 
