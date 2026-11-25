@@ -92,6 +92,8 @@ CREATE TABLE IF NOT EXISTS ml.forecast_backtest (
 );
 -- Revenue forecast (USD, total amount of valid trips): same run structure, own tables.
 ALTER TABLE ml.forecast_run ADD COLUMN IF NOT EXISTS target text NOT NULL DEFAULT 'trips';
+-- A forecast replayed as if made at the time, for the forecast-against-actual history.
+ALTER TABLE ml.forecast_run ADD COLUMN IF NOT EXISTS replay boolean NOT NULL DEFAULT false;
 CREATE TABLE IF NOT EXISTS ml.revenue_forecast (
     run_id          text NOT NULL REFERENCES ml.forecast_run ON DELETE CASCADE,
     zone_sk         integer NOT NULL,
@@ -149,22 +151,30 @@ def _none(value):
     return None if value is None or (isinstance(value, float) and pd.isna(value)) else value
 
 
-def save(conn, run_id: str, result: Result, data_run: str, history_months: list[str]) -> bool:
-    """Write the run in one transaction; returns True when its forecast was published."""
+def save(
+    conn,
+    run_id: str,
+    result: Result,
+    data_run: str,
+    history_months: list[str],
+    replay: bool = False,
+) -> bool:
+    """Write the run in one transaction; returns True when its forecast was published. A
+    replay is recorded (run, scores, backtests) but never published."""
     overall = result.evaluation[result.evaluation.segment_type == "overall"].iloc[0]
     with conn.transaction(), conn.cursor() as cur:
         cur.execute(DDL)
         cur.execute(
             """INSERT INTO ml.forecast_run (run_id, data_run, history_months, validated_month,
                    forecast_month, model, rounds, wmape, baseline_wmape, beats_baseline, reasons,
-                   champion, decision, target)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                   champion, decision, target, replay)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
             (
                 run_id, data_run, history_months, result.validated_month, result.forecast_month,
                 "challenger: lightgbm poisson + quantile 10/90; baseline: seasonal naive 4 weeks",
                 result.rounds, float(overall.wmape), float(overall.baseline_wmape),
                 result.beats_baseline, result.reasons, result.champion, result.decision,
-                result.target,
+                result.target, replay,
             ),
         )  # fmt: skip
         cur.executemany(
@@ -185,7 +195,7 @@ def save(conn, run_id: str, result: Result, data_run: str, history_months: list[
                 for row in result.backtests.to_dict("records")
             ],
         )  # fmt: skip
-        if not result.publishable:
+        if replay or not result.publishable:
             return False
         # Only the published forecast is kept in full; earlier runs stay in forecast_run,
         # forecast_evaluation, forecast_backtest and MLflow. (Table names are constants.)

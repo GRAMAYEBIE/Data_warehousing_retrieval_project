@@ -1,10 +1,13 @@
 """Demand forecast after each publication (wave 7).
 
-Scheduled on the asset `analytics_published`: each time the monthly pipeline publishes,
-this DAG retrains the model on every published month, validates it on the latest one
-against the seasonal naive baseline, records the run in MLflow and, when it beats the
-baseline, publishes the forecast of the next month to the ml schema (ml/README in the
-repository: method, metrics, decision rule). Can also be triggered by hand.
+Scheduled on the asset `analytics_published`: each time a month is published (monthly
+batch or stream), this DAG
+1. checks the published forecast of that month against what was recorded (error, bias,
+   80 % coverage, drift against what the backtests promised), before it is replaced;
+2. backtests the seasonal baseline and the LightGBM challenger on the last three months,
+   keeps the champion, records the run in MLflow and publishes the forecast of the next
+   month to the ml schema.
+The loop then repeats with every new month. Can also be triggered by hand.
 
 Needs the profile ml (MLflow) to be running; the task fails clearly otherwise.
 """
@@ -31,7 +34,7 @@ FORECAST_ENV = {
 
 with DAG(
     dag_id="demand_forecast",
-    description="Train, validate against the baseline, track in MLflow, publish the forecast",
+    description="Check last forecast against actual, then train, choose, track, publish",
     schedule=[ANALYTICS_PUBLISHED],
     start_date=datetime(2026, 11, 1),
     catchup=False,
@@ -45,7 +48,7 @@ with DAG(
     doc_md=__doc__,
 ) as dag:
     BashOperator(
-        task_id="train_validate_publish",
+        task_id="check_train_publish",
         bash_command="/opt/forecast_venv/bin/python -m forecasting",
         env=FORECAST_ENV,
         append_env=True,

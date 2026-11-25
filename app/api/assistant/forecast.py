@@ -81,6 +81,44 @@ REVENUE_TABLES = {
 }
 
 
+# Forecast against actual (ml/check.py): each forecast month checked once recorded. One
+# check per target and month: the live forecast when there is one, else the replay.
+LATEST_CHECKS = """
+WITH latest AS (
+    SELECT DISTINCT ON (target, month) *
+    FROM ml.forecast_check_run
+    ORDER BY target, month, replay, checked_at DESC
+)"""
+CHECK_TABLES = {
+    "checks": LATEST_CHECKS
+    + """
+        SELECT run_id, target, month, replay, method, expected_wmape::float AS expected_wmape,
+               actual_wmape::float AS actual_wmape, status, checked_at::text AS checked_at
+        FROM latest
+        ORDER BY month, target
+        LIMIT 48""",
+    "check_scores": LATEST_CHECKS
+    + """
+        SELECT l.target, l.month, s.segment_type, s.segment, s.actual::float AS actual,
+               s.predicted::float AS predicted, s.wmape::float AS wmape, s.bias::float AS bias,
+               s.coverage_80::float AS coverage_80
+        FROM latest AS l JOIN ml.forecast_check AS s USING (run_id)
+        WHERE s.segment_type IN ('overall', 'borough_day')
+        ORDER BY l.month, l.target, s.segment_type, s.segment
+        LIMIT 600""",
+    # Borough x day, forecast and recorded, of the last twelve months checked.
+    "check_daily": LATEST_CHECKS
+    + """
+        SELECT l.target, l.month, d.borough, d.date_day::text AS date_day,
+               d.predicted::float AS predicted, d.lower_80::float AS lower,
+               d.upper_80::float AS upper, d.actual::float AS actual
+        FROM latest AS l JOIN ml.forecast_check_daily AS d USING (run_id)
+        WHERE l.month IN (SELECT DISTINCT month FROM latest ORDER BY month DESC LIMIT 12)
+        ORDER BY l.target, l.month, d.borough, d.date_day
+        LIMIT 5000""",
+}
+
+
 def compute(store) -> dict:
     """The page's data; {"available": False, ...} when no forecast was published yet."""
     try:
@@ -114,6 +152,14 @@ def compute(store) -> dict:
         revenue_evaluation = [dict(zip(e_columns, r, strict=True)) for r in e_rows]
         for name, sql in REVENUE_TABLES.items():
             add(name, sql, r_params)
+
+    # Forecast against actual, when a month has been checked.
+    try:
+        for name, sql in CHECK_TABLES.items():
+            add(name, sql, {})
+    except psycopg.errors.UndefinedTable:  # no month checked yet
+        for name in CHECK_TABLES:
+            tables.pop(name, None)
     return {
         "available": True,
         "run": run,

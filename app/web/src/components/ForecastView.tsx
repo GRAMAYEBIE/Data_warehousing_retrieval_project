@@ -20,8 +20,10 @@ import { api, type ForecastView as Forecast } from "../api/client";
 import { useConfig } from "../lib/config";
 import { compact, formatValue, monthLabel } from "../lib/format";
 import { useIsDark } from "../lib/theme";
-import { CountUp, rise, spring, stagger } from "./motion";
+import { CountUp, rise, stagger } from "./motion";
+import ForecastCheck from "./ForecastCheck";
 import { BarList, INK, Tip } from "./ResultChart";
+import Tabs from "./Tabs";
 
 type Table = Forecast["tables"][string];
 
@@ -171,6 +173,13 @@ export default function ForecastView() {
         </Panel>
       </div>
 
+      <Panel
+        title="Forecast against actual"
+        subtitle="Each forecast month checked once its trips are recorded, month after month"
+      >
+        <ForecastCheck tables={data.tables} ink={ink} />
+      </Panel>
+
       <div className="grid gap-4 lg:grid-cols-5">
         <Panel className="lg:col-span-3" title="An average day, hour by hour" subtitle={`Expected trips per hour, city-wide, ${month}`}>
           <Hourly table={data.tables.hourly} ink={ink} />
@@ -268,37 +277,6 @@ function Daily({ series, ink }: { series: { trips: Series; revenue?: Series }; i
           </ComposedChart>
         </ResponsiveContainer>
       </div>
-    </div>
-  );
-}
-
-function Tabs<T extends string>({
-  label,
-  id,
-  items,
-  value,
-  onChange,
-}: {
-  label: string;
-  id: string;
-  items: [T, string][];
-  value: T;
-  onChange: (v: T) => void;
-}) {
-  return (
-    <div className="inline-flex rounded-input bg-tint p-1" role="tablist" aria-label={label}>
-      {items.map(([key, text]) => (
-        <button
-          key={key}
-          role="tab"
-          aria-selected={value === key}
-          onClick={() => onChange(key)}
-          className={`relative rounded-[8px] px-3 py-1 text-xs font-medium transition-colors ${value === key ? "text-ink" : "text-ink-2 hover:text-ink"}`}
-        >
-          {value === key && <motion.span layoutId={id} className="absolute inset-0 rounded-[8px] bg-surface shadow-soft" transition={spring} />}
-          <span className="relative">{text}</span>
-        </button>
-      ))}
     </div>
   );
 }

@@ -218,3 +218,61 @@ def test_fewer_than_six_months_is_never_publishable():
     result = pipeline.run(synthetic(months=4, seed=1))
     assert not result.publishable
     assert any("6 required" in r for r in result.reasons)
+
+
+# ------------------------------------------------------------------ forecast against actual
+def test_a_replay_sees_only_the_months_before_the_one_it_forecasts(history):
+    from forecasting.check import history_until
+
+    past = history_until(history, "2025-03")
+    assert past.months == ["2024-12", "2025-01", "2025-02", "2025-03"]
+    assert past.trips.shape[1] == len(past.days) and past.days[-1] == pd.Timestamp("2025-03-31")
+    assert np.array_equal(past.trips, history.trips[:, : len(past.days), :])
+
+
+@pytest.fixture(scope="module")
+def checked(history):
+    from forecasting.check import compare, history_until
+
+    replayed = pipeline.run(history_until(history, "2025-04"))
+    return replayed, compare(history, replayed.forecast, replayed.daily, 0.05)
+
+
+def test_a_forecast_is_checked_against_what_was_recorded(history, checked):
+    replayed, check = checked
+    assert replayed.forecast_month == check.month == "2025-05"
+    s = check.scores.set_index(["segment_type", "segment"])
+    may = history.trips[:, history.days.month == 5, :]
+    assert s.loc[("overall", "all"), "actual"] == pytest.approx(may.sum())
+    expected = replayed.forecast.predicted.sum()
+    assert s.loc[("overall", "all"), "predicted"] == pytest.approx(expected)
+    assert {"overall", "borough", "tier", "borough_day"} <= set(check.scores.segment_type)
+    assert len(check.daily) == 5 * 31 and check.actual_wmape < 0.3 and check.status == "ok"
+    # The borough-day coverage is that of the borough-day range planners read.
+    inside = (check.daily.actual >= check.daily.lower) & (check.daily.actual <= check.daily.upper)
+    assert s.loc[("borough_day", "all"), "coverage_80"] == pytest.approx(inside.mean())
+
+
+def test_a_month_not_recorded_yet_cannot_be_checked(history, checked):
+    from forecasting.check import compare, history_until
+
+    replayed, _ = checked
+    with pytest.raises(ValueError, match="not fully recorded"):
+        compare(history_until(history, "2025-04"), replayed.forecast, replayed.daily, 0.05)
+
+
+def test_drift_is_an_error_well_above_what_the_backtests_promised(history, checked):
+    from forecasting.check import compare, status_of
+
+    assert status_of(0.08, 0.06) == "ok"  # above, but within 1.5 times
+    assert status_of(0.12, 0.06) == "drift"
+    assert status_of(0.04, 0.02) == "ok"  # twice as high but only 2 points: noise
+    assert status_of(0.30, None) == "ok"  # nothing promised
+    replayed, _ = checked
+    doubled = replayed.forecast.assign(predicted=replayed.forecast.predicted * 2)
+    daily = replayed.daily.assign(predicted=replayed.daily.predicted * 2)
+    check = compare(history, doubled, daily, 0.05)
+    assert check.status == "drift"
+    assert check.scores.set_index(["segment_type", "segment"]).loc[
+        ("overall", "all"), "bias"
+    ] == pytest.approx(1.0, abs=0.15)

@@ -44,14 +44,24 @@ def _key(*parts: str) -> str:
     return re.sub(r"[^\w\-. /]", "_", ".".join(parts)).lower()
 
 
-def log(result: Result, data_run: str, history_months: list[str], tracking_uri: str) -> str:
-    """Record the run in MLflow; returns its run id (also the key of ml.forecast_run)."""
+def log(
+    result: Result,
+    data_run: str,
+    history_months: list[str],
+    tracking_uri: str,
+    replay: bool = False,
+) -> str:
+    """Record the run in MLflow; returns its run id (also the key of ml.forecast_run). A
+    replay (forecast made again as at the time, for the check history) is tagged and its
+    model is not registered."""
     name = NAMES[result.target]
     mlflow.set_tracking_uri(tracking_uri)
     mlflow.set_experiment(name)
-    with mlflow.start_run(run_name=f"{result.target} {result.forecast_month}") as run:
+    prefix = "replay " if replay else ""
+    with mlflow.start_run(run_name=f"{prefix}{result.target} {result.forecast_month}") as run:
         mlflow.set_tags(
             {
+                "replay": str(replay).lower(),
                 "target": result.target,
                 "data_run": data_run,
                 "history_months": ",".join(history_months),
@@ -90,6 +100,8 @@ def log(result: Result, data_run: str, history_months: list[str], tracking_uri: 
         mlflow.log_text(result.evaluation.to_csv(index=False), "evaluation.csv")
         mlflow.log_text(result.backtests.to_csv(index=False), "backtests.csv")
         mlflow.log_text(result.importance.to_csv(index=False), "feature_importance.csv")
+        if replay:
+            return run.info.run_id
         # The challenger is registered every month; it carries the alias "production" only
         # while it is the champion (otherwise the baseline is in service, not a model).
         info = mlflow.lightgbm.log_model(

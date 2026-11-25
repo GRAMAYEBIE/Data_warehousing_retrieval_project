@@ -6,7 +6,8 @@ import { Area, CartesianGrid, ComposedChart, Line, ResponsiveContainer, Tooltip,
 import { api, type PlannerView as Plan } from "../api/client";
 import { compact, formatValue, monthLabel } from "../lib/format";
 import { useIsDark } from "../lib/theme";
-import { rise, spring, stagger } from "./motion";
+import { rise, stagger } from "./motion";
+import Tabs from "./Tabs";
 import { BarList, INK } from "./ResultChart";
 
 type Zone = Plan["zones"][number];
@@ -269,25 +270,6 @@ function Controls({ known, zones, onAdd, onRemove, dayType, onDayType, start, on
         {!zones.length && <li className="text-sm text-ink-3">No zone chosen yet.</li>}
       </ul>
     </section>
-  );
-}
-
-function Tabs<T extends string>({ label, id, items, value, onChange }: { label: string; id: string; items: [T, string][]; value: T; onChange: (v: T) => void }) {
-  return (
-    <div className="inline-flex flex-wrap rounded-input bg-tint p-1" role="tablist" aria-label={label}>
-      {items.map(([key, text]) => (
-        <button
-          key={key}
-          role="tab"
-          aria-selected={value === key}
-          onClick={() => onChange(key)}
-          className={`relative rounded-[8px] px-3 py-1.5 text-xs font-medium transition-colors ${value === key ? "text-ink" : "text-ink-2 hover:text-ink"}`}
-        >
-          {value === key && <motion.span layoutId={id} className="absolute inset-0 rounded-[8px] bg-surface shadow-soft" transition={spring} />}
-          <span className="relative">{text}</span>
-        </button>
-      ))}
-    </div>
   );
 }
 

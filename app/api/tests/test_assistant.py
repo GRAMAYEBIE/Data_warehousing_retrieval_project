@@ -624,11 +624,15 @@ def test_the_forecast_page_reads_the_published_run_only():
     from assistant import forecast
 
     class ForecastStore:
-        def __init__(self):
-            self.sql = []
+        def __init__(self, checked=False):
+            self.sql, self.checked = [], checked
 
         def query(self, sql, params):
             self.sql.append(sql)
+            if "ml.forecast_check_run" in sql:
+                if not self.checked:  # no month checked yet: the page has no check section
+                    raise psycopg.errors.UndefinedTable("relation ml.forecast_check_run")
+                return ["month", "status"], [("2025-05", "ok")], 1
             if "ml.current_revenue_run" in sql:
                 return ["run_id"], [], 1  # no revenue forecast yet: the page still works
             if "ml.current_run" in sql:
@@ -649,6 +653,9 @@ def test_the_forecast_page_reads_the_published_run_only():
     # Every table query is bounded (the run and evaluation queries return a handful of rows).
     tables = [s for s in store.sql if "forecast_evaluation" not in s and "current_" not in s]
     assert tables and all("LIMIT" in sql for sql in tables)
+    # Once a month is checked, the forecast against actual comes with the page.
+    checked = forecast.compute(ForecastStore(checked=True))["tables"]
+    assert {"checks", "check_scores", "check_daily"} <= set(checked)
 
     class NoSchema:
         def query(self, sql, params):
