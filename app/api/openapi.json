@@ -923,6 +923,331 @@
     "title": "Period",
     "type": "string"
    },
+   "PlannerBody": {
+    "properties": {
+     "day_type": {
+      "default": "weekday",
+      "enum": [
+       "weekday",
+       "weekend",
+       "all"
+      ],
+      "title": "Day Type",
+      "type": "string"
+     },
+     "hours": {
+      "default": 8,
+      "maximum": 12.0,
+      "minimum": 1.0,
+      "title": "Hours",
+      "type": "integer"
+     },
+     "start_hour": {
+      "maximum": 23.0,
+      "minimum": 0.0,
+      "title": "Start Hour",
+      "type": "integer"
+     },
+     "zones": {
+      "items": {
+       "type": "string"
+      },
+      "maxItems": 5,
+      "minItems": 1,
+      "title": "Zones",
+      "type": "array"
+     }
+    },
+    "required": [
+     "zones",
+     "start_hour"
+    ],
+    "title": "PlannerBody",
+    "type": "object"
+   },
+   "PlannerView": {
+    "description": "Zone opportunity over a shift window (an estimate, not one taxi's earnings).",
+    "properties": {
+     "available": {
+      "title": "Available",
+      "type": "boolean"
+     },
+     "champion": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Champion"
+     },
+     "day_type": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Day Type"
+     },
+     "forecast_month": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Forecast Month"
+     },
+     "hours": {
+      "items": {
+       "type": "integer"
+      },
+      "title": "Hours",
+      "type": "array"
+     },
+     "message": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Message"
+     },
+     "recent_days": {
+      "default": 0,
+      "title": "Recent Days",
+      "type": "integer"
+     },
+     "recent_from": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Recent From"
+     },
+     "recent_to": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Recent To"
+     },
+     "revenue_champion": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Revenue Champion"
+     },
+     "tables": {
+      "additionalProperties": {
+       "$ref": "#/components/schemas/OverviewTable"
+      },
+      "title": "Tables",
+      "type": "object"
+     },
+     "unknown_zones": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Unknown Zones",
+      "type": "array"
+     },
+     "zones": {
+      "items": {
+       "$ref": "#/components/schemas/PlannerZone"
+      },
+      "title": "Zones",
+      "type": "array"
+     }
+    },
+    "required": [
+     "available",
+     "message",
+     "forecast_month",
+     "recent_from",
+     "recent_to",
+     "recent_days",
+     "champion",
+     "revenue_champion",
+     "day_type",
+     "hours",
+     "unknown_zones",
+     "zones",
+     "tables"
+    ],
+    "title": "PlannerView",
+    "type": "object"
+   },
+   "PlannerZone": {
+    "description": "One zone over the chosen window: forecast for a typical matching day of next month,\nand what was recorded there over the recent weeks.",
+    "properties": {
+     "borough": {
+      "title": "Borough",
+      "type": "string"
+     },
+     "demand_tier": {
+      "title": "Demand Tier",
+      "type": "string"
+     },
+     "expected_revenue": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Expected Revenue"
+     },
+     "expected_trips": {
+      "title": "Expected Trips",
+      "type": "number"
+     },
+     "fare_per_ride_hour": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Fare Per Ride Hour"
+     },
+     "fare_per_trip": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Fare Per Trip"
+     },
+     "low_confidence": {
+      "title": "Low Confidence",
+      "type": "boolean"
+     },
+     "miles_per_trip": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Miles Per Trip"
+     },
+     "minutes_per_trip": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Minutes Per Trip"
+     },
+     "recent_median": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Recent Median"
+     },
+     "recent_p10": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Recent P10"
+     },
+     "recent_p90": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Recent P90"
+     },
+     "recorded_trips": {
+      "title": "Recorded Trips",
+      "type": "number"
+     },
+     "ride_hours": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Ride Hours"
+     },
+     "zone_name": {
+      "title": "Zone Name",
+      "type": "string"
+     }
+    },
+    "required": [
+     "zone_name",
+     "borough",
+     "demand_tier",
+     "low_confidence",
+     "expected_trips",
+     "expected_revenue",
+     "recent_p10",
+     "recent_median",
+     "recent_p90",
+     "recorded_trips",
+     "fare_per_trip",
+     "minutes_per_trip",
+     "miles_per_trip",
+     "ride_hours",
+     "fare_per_ride_hour"
+    ],
+    "title": "PlannerZone",
+    "type": "object"
+   },
    "Provenance": {
     "properties": {
      "active_filters": {
@@ -1541,6 +1866,98 @@
      }
     },
     "summary": "Overview"
+   }
+  },
+  "/planner": {
+   "post": {
+    "description": "What the chosen zones offer over a shift window next month (zone opportunity).",
+    "operationId": "plan_shift_planner_post",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "authorization",
+      "required": false,
+      "schema": {
+       "default": "",
+       "title": "Authorization",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/PlannerBody"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/PlannerView"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Plan Shift"
+   }
+  },
+  "/planner/zones": {
+   "get": {
+    "description": "The zones of the published forecast, busiest first.",
+    "operationId": "planner_zones_planner_zones_get",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "authorization",
+      "required": false,
+      "schema": {
+       "default": "",
+       "title": "Authorization",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/OverviewTable"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Planner Zones"
    }
   },
   "/reports": {

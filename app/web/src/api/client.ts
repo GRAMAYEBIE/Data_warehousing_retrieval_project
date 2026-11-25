@@ -13,6 +13,8 @@ export type ReportPreview = components["schemas"]["ReportPreview"];
 export type QueryPlan = components["schemas"]["QueryPlan"];
 export type OverviewView = components["schemas"]["OverviewView"];
 export type ForecastView = components["schemas"]["ForecastView"];
+export type PlannerView = components["schemas"]["PlannerView"];
+export type PlannerBody = components["schemas"]["PlannerBody"];
 
 export class ApiError extends Error {
   constructor(
@@ -85,6 +87,8 @@ export const api = {
   catalog: () => call<CatalogView>("GET", "/catalog"),
   overview: () => call<OverviewView>("GET", "/overview"),
   forecast: () => call<ForecastView>("GET", "/forecast"),
+  plannerZones: () => call<components["schemas"]["OverviewTable"]>("GET", "/planner/zones"),
+  plan: (body: PlannerBody) => call<PlannerView>("POST", "/planner", body),
   newSession: () =>
     call<components["schemas"]["SessionCreated"]>("POST", "/sessions").then((s) => s.session_id),
   ask: (sessionId: string, question: string) =>

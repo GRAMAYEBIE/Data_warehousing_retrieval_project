@@ -143,6 +143,10 @@
   .chip {
     @apply inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium;
   }
+  .input {
+    @apply h-9 rounded-input border border-line bg-page/60 px-3 text-sm text-ink outline-none transition
+      placeholder:text-ink-3 focus:border-line-strong focus:bg-surface disabled:opacity-60;
+  }
   .pill {
     @apply inline-flex items-center rounded-full bg-tint px-2 py-0.5 text-xs font-medium text-ink-2;
   }

@@ -11,7 +11,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 
-from assistant import guards, metrics, retrieval, telemetry
+from assistant import forecast_questions, guards, metrics, retrieval, telemetry
 from assistant.catalog import DIMENSIONS, RELATIONS, Catalog, load_catalog
 from assistant.config import Settings
 from assistant.grounding import ground, named_period, names_a_metric
@@ -74,6 +74,8 @@ class Session:
     turns: int = 0
     # The last exchanges (question, answer text), for a conversation that follows on.
     history: list[tuple[str, str]] = field(default_factory=list)
+    # The scope of the last answer when it came from the forecast ("and for Queens?").
+    last_forecast: forecast_questions.ForecastAsk | None = None
 
 
 class Assistant:
@@ -300,7 +302,15 @@ class Assistant:
                 )
             )
 
-        # 2. Plan with the model (structured output).
+        # 2. A question about next month: the published forecast, answered by code.
+        with telemetry.step("forecast", timings):
+            routed = self.forecast_answer(question, session)
+        if routed is not None:
+            forecast_answer, audit = routed
+            return finish(forecast_answer, **audit)
+        session.last_forecast = None
+
+        # 3. Plan with the model (structured output).
         try:
             with telemetry.step("plan", timings):
                 plan = self.plan(question, session, variant)
@@ -409,7 +419,7 @@ class Assistant:
                 )
             )
 
-        # 3. Grounding in the question, validation and policy, with one repair for
+        # 4. Grounding in the question, validation and policy, with one repair for
         # vocabulary mistakes of the model.
         context_filters = list(session.active_filters) + (
             list(session.last_plan.filters) if session.last_plan else []
@@ -482,7 +492,7 @@ class Assistant:
                 )
             )
 
-        # 4. Execution as ai_reader.
+        # 5. Execution as ai_reader.
         rendered = render(built.sql, built.params)
         try:
             with telemetry.step("execute", timings, **{"assistant.template": built.kind}):
@@ -530,7 +540,7 @@ class Assistant:
                 row_count=0,
             )
 
-        # 5. Narrative from the result only, then the number check.
+        # 6. Narrative from the result only, then the number check.
         with telemetry.step("narrate", timings) as span:
             narrative, check, rejected = self.narrate(
                 question, plan, columns, rows, period, filters
@@ -558,6 +568,152 @@ class Assistant:
             provenance=provenance,
         )
         return finish(answer, rendered_sql=rendered, row_count=len(rows), narrative_check=check)
+
+    # ------------------------------------------------------------------ forecast questions
+    def forecast_answer(self, question: str, session: Session) -> tuple[Answer, dict] | None:
+        """The answer from the published forecast, or None for the governed path."""
+        fq = forecast_questions
+        cat = self.catalog()
+        # A question with its own forecast words starts afresh; only a short one without
+        # them ("and for Queens?") continues the previous forecast answer.
+        fresh = fq.wants_forecast(question, cat)
+        follow = (
+            not fresh
+            and session.last_forecast is not None
+            and fq.is_follow_up(question)
+            and fq.names_scope(fq.read(question, cat))
+        )
+        if not follow and not fresh:
+            return None
+
+        def refused(status: str, narrative: str, reasons: list[str]) -> tuple[Answer, dict]:
+            return (
+                Answer(
+                    session_id=session.session_id,
+                    status=status,
+                    question=question,
+                    reasons=reasons,
+                    narrative=narrative,
+                ),
+                {},
+            )
+
+        measure = None if follow else fq.unforecast_measure(question)
+        if measure:
+            return refused(
+                "unsupported",
+                f"Only trips and revenue are forecast, not {measure}. Ask, for example, how "
+                "many trips are expected next month in a borough, or the expected revenue.",
+                [f"{measure} is not forecast: the forecast covers trips and revenue"],
+            )
+        ask = (
+            fq.follow_up(question, session.last_forecast, cat) if follow else fq.read(question, cat)
+        )
+        named = named_period(question)
+        try:
+            run = fq.run_of(self.store, ask.target)
+        except fq.NoForecast as exc:
+            if named is not None:
+                return None  # a month after the published ones: the coverage is explained there
+            return refused("unsupported", f"I cannot answer this yet: {exc}.", [str(exc)])
+        month = run["forecast_month"]
+        if named is not None and (named.start_month, named.end_month) != (month, month):
+            reason = (
+                f"the published forecast covers {month_name(month)} only; recorded data covers "
+                f"{month_name(cat.months[0])} to {month_name(cat.months[-1])}"
+            )
+            return refused("rejected", f"I cannot answer this as asked: {reason}.", [reason])
+
+        metric = fq.METRIC[ask.target]
+        meta = cat.metrics[metric]
+        try:
+            result = fq.answer(self.store, ask, run, meta["unit"])
+        except Exception as exc:  # noqa: BLE001 - any database error is reported, not raised
+            return refused(
+                "query_failed",
+                "The forecast could not be read (time limit or database error).",
+                [f"{type(exc).__name__}: {str(exc).splitlines()[0]}"],
+            )
+        rendered = fq.shown_sql(result.sql, result.params)
+        relation, value, _ = fq.SOURCES[ask.target]
+        provenance = Provenance(
+            metrics=[
+                MetricProvenance(
+                    name=metric,
+                    label=f"{meta['label']} (forecast)",
+                    definition=f"Forecast of: {meta['description']}",
+                    sql_expression=f"sum({value}) of {relation}",
+                    unit=meta["unit"],
+                    filters="published forecast of the latest run",
+                    is_estimate=True,
+                )
+            ],
+            source_months=list(run["history_months"]),
+            period_resolved={"period": month, "compared_with": ""},
+            published_run=run["data_run"],
+            published_at=run["created_at"],
+            valid_trip_rate=None,
+            active_filters=result.plan.filters,
+            rendered_sql=rendered,
+            row_count=len(result.rows),
+            data_layer="ml (published forecast, read-only role ai_reader)",
+        )
+        session.last_forecast = ask
+        if not result.rows:
+            return (
+                Answer(
+                    session_id=session.session_id,
+                    status="empty",
+                    question=question,
+                    plan=result.plan,
+                    columns=result.columns,
+                    provenance=provenance,
+                    narrative=f"The forecast has nothing for this selection in "
+                    f"{month_name(month)}{fq.scope_text(ask)}.",
+                ),
+                {"rendered_sql": rendered, "row_count": 0},
+            )
+        # The figures come from the forecast query; the model only words them, and its text is
+        # kept only if every number is in the result and it reads as an estimate.
+        with telemetry.step("narrate", {}) as span:
+            try:
+                text = self.llm.chat(
+                    load_prompt("narrate"),
+                    fq.model_message(question, ask, result, meta["label"]),
+                    max_tokens=160,
+                    **self.token_stream(),
+                ).strip()
+                problem = fq.check_model_text(text, ask, result)
+            except ModelUnavailable as exc:
+                text, problem = "", f"narrative not written by the model: {exc}"
+            check = "replaced" if problem else "passed"
+            span.set_attribute("assistant.narrative_check", check)
+        reasons = ["forecast: figures from the published forecast, worded by the model"]
+        if problem:
+            reasons = [
+                "forecast: figures from the published forecast, worded by code",
+                f"narrative replaced, {problem}. Model text: {text[:400]}",
+            ]
+        return (
+            Answer(
+                session_id=session.session_id,
+                status="answered",
+                question=question,
+                plan=result.plan,
+                columns=result.columns,
+                rows=result.rows,
+                narrative=result.narrative if problem else text,
+                narrative_check=check,
+                reasons=reasons,
+                suggested_chart=self.suggest_chart(result.plan, "plain"),
+                suggested_followup=(
+                    "And by hour?" if ask.by != "pickup_hour" else "And for Queens?"
+                ),
+                limitations=result.limitations,
+                provenance=provenance,
+            ),
+            {"rendered_sql": rendered, "row_count": len(result.rows), "narrative_check": check},
+        )
 
     # ------------------------------------------------------------------ helpers
     def narrate(
@@ -663,6 +819,13 @@ class Assistant:
             "checks every number of the text against the result and replaces the text if "
             "one is not there. Every answer is logged with its trace.\n"
             f"- Breakdowns available: {dimensions}.\n"
+            "- Forecast: next month's trips and revenue per pickup zone, day and hour, "
+            "published by a monthly job tracked in MLflow. A seasonal baseline (same weekday "
+            "and hour over the last four weeks) and a LightGBM model compete on the three "
+            "previous months; the winner is used. Questions such as 'How many trips are "
+            "expected in Manhattan next month?' are answered from it by code, labelled as "
+            "estimates. The Forecast page shows its accuracy; the Shift planner page compares "
+            "zones over a shift window.\n"
             "- Not in the data: driver earnings, wait times, cancellations, rider identity, "
             "profit, weather, Uber/Lyft/Green taxis.\n"
             f"- Governed measures:\n{measures}"

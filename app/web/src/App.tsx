@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { BarChart3, FileBarChart2, LayoutDashboard, MessagesSquare, TrendingUp } from "lucide-react";
+import { BarChart3, CalendarClock, FileBarChart2, LayoutDashboard, MessagesSquare, TrendingUp } from "lucide-react";
 import { useState } from "react";
 import { api } from "./api/client";
 import AskView from "./components/AskView";
@@ -9,6 +9,7 @@ import ForecastView from "./components/ForecastView";
 import { MeasuresDrawer, MeasuresList } from "./components/MeasuresPanel";
 import { ease } from "./components/motion";
 import OverviewView from "./components/OverviewView";
+import PlannerView from "./components/PlannerView";
 import ReportBuilder from "./components/ReportBuilder";
 import Sidebar, { BrandMark, type Page, ThemeSwitch } from "./components/Sidebar";
 import { useConfig } from "./lib/config";
@@ -60,6 +61,14 @@ export default function App() {
           >
             {/* Loaded on first visit only: the overview stays the first request. */}
             <ErrorBoundary label="forecast">{(page === "forecast" || seen.forecast) && <ForecastView />}</ErrorBoundary>
+          </motion.main>
+          <motion.main
+            className={`min-h-0 min-w-0 flex-1 flex-col overflow-y-auto ${page === "planner" ? "flex" : "hidden"}`}
+            initial={false}
+            animate={page === "planner" ? PAGE.shown : PAGE.hidden}
+            aria-label="Shift planner"
+          >
+            <ErrorBoundary label="shift planner">{(page === "planner" || seen.planner) && <PlannerView />}</ErrorBoundary>
           </motion.main>
           <motion.main
             className={`min-h-0 min-w-0 flex-1 flex-col ${page === "ask" ? "flex" : "hidden"}`}
@@ -120,6 +129,7 @@ function MobileNav({ page, onPage, ready }: { page: Page; onPage: (page: Page) =
       </span>
       {item("overview", <LayoutDashboard size={17} aria-hidden="true" />, "Overview")}
       {item("forecast", <TrendingUp size={17} aria-hidden="true" />, "Forecast")}
+      {item("planner", <CalendarClock size={17} aria-hidden="true" />, "Planner")}
       {item("ask", <MessagesSquare size={17} aria-hidden="true" />, "Ask")}
       {item("reports", <FileBarChart2 size={17} aria-hidden="true" />, "Reports")}
       <a className="btn h-9 px-2.5 text-ink-2 hover:bg-tint" href={config.supersetUrl} target="_blank" rel="noreferrer" aria-label="Dashboards (opens in a new tab)">

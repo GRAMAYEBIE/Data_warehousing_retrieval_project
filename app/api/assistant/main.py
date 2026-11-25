@@ -11,6 +11,7 @@ import queue
 import threading
 from contextlib import asynccontextmanager
 from functools import lru_cache
+from typing import Literal
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Response
 from fastapi.responses import StreamingResponse
@@ -23,7 +24,9 @@ from assistant.api_models import (
     DimensionInfo,
     ForecastView,
     Health,
+    OverviewTable,
     OverviewView,
+    PlannerView,
     Rejection,
     ReportPreview,
     ReportView,
@@ -148,6 +151,38 @@ def forecast() -> ForecastView:
         return ForecastView.model_validate(page.compute(get_assistant().store))
     except Exception as exc:  # noqa: BLE001 - the page reports the failure, the API stays up
         raise HTTPException(503, f"forecast unavailable: {type(exc).__name__}") from exc
+
+
+class PlannerBody(BaseModel):
+    zones: list[str] = Field(min_length=1, max_length=5)
+    day_type: Literal["weekday", "weekend", "all"] = "weekday"
+    start_hour: int = Field(ge=0, le=23)
+    hours: int = Field(default=8, ge=1, le=12)
+
+
+@app.get("/planner/zones", dependencies=[Depends(authorised)])
+def planner_zones() -> OverviewTable:
+    """The zones of the published forecast, busiest first."""
+    from assistant import planner
+
+    try:
+        return OverviewTable.model_validate(planner.zones(get_assistant().store))
+    except Exception as exc:  # noqa: BLE001 - the page reports the failure, the API stays up
+        raise HTTPException(503, f"planner unavailable: {type(exc).__name__}") from exc
+
+
+@app.post("/planner", dependencies=[Depends(authorised)])
+def plan_shift(body: PlannerBody) -> PlannerView:
+    """What the chosen zones offer over a shift window next month (zone opportunity)."""
+    from assistant import planner
+
+    try:
+        result = planner.plan(
+            get_assistant().store, body.zones, body.day_type, body.start_hour, body.hours
+        )
+        return PlannerView.model_validate(result)
+    except Exception as exc:  # noqa: BLE001 - the page reports the failure, the API stays up
+        raise HTTPException(503, f"planner unavailable: {type(exc).__name__}") from exc
 
 
 @app.post("/sessions", dependencies=[Depends(authorised)])

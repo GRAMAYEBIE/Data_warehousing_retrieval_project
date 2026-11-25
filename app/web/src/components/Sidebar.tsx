@@ -3,6 +3,7 @@ import {
   Activity,
   ArrowUpRight,
   BarChart3,
+  CalendarClock,
   CarTaxiFront,
   FileBarChart2,
   Laptop,
@@ -20,7 +21,7 @@ import { DATA_OWNER } from "../lib/measures";
 import { type Theme, useTheme } from "../lib/theme";
 import { spring } from "./motion";
 
-export type Page = "overview" | "forecast" | "ask" | "reports";
+export type Page = "overview" | "forecast" | "planner" | "ask" | "reports";
 
 export function BrandMark({ size = 32 }: { size?: number }) {
   return (
@@ -60,6 +61,9 @@ export default function Sidebar({ page, onPage, health, catalog }: Props) {
         </NavItem>
         <NavItem active={page === "forecast"} onClick={() => onPage("forecast")} icon={<TrendingUp size={16} />}>
           Forecast
+        </NavItem>
+        <NavItem active={page === "planner"} onClick={() => onPage("planner")} icon={<CalendarClock size={16} />}>
+          Shift planner
         </NavItem>
         <div className="label px-2.5 pb-1.5 pt-5">Assistant</div>
         <NavItem active={page === "ask"} onClick={() => onPage("ask")} icon={<MessagesSquare size={16} />}>

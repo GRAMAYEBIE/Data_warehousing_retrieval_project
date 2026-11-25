@@ -78,6 +78,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/planner": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Plan Shift
+         * @description What the chosen zones offer over a shift window next month (zone opportunity).
+         */
+        post: operations["plan_shift_planner_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/planner/zones": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Planner Zones
+         * @description The zones of the published forecast, busiest first.
+         */
+        get: operations["planner_zones_planner_zones_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/reports": {
         parameters: {
             query?: never;
@@ -529,6 +569,98 @@ export interface components {
          * @enum {string}
          */
         Period: "latest_month" | "previous_month" | "last_3_months" | "all_months" | "custom";
+        /** PlannerBody */
+        PlannerBody: {
+            /**
+             * Day Type
+             * @default weekday
+             * @enum {string}
+             */
+            day_type: "weekday" | "weekend" | "all";
+            /**
+             * Hours
+             * @default 8
+             */
+            hours: number;
+            /** Start Hour */
+            start_hour: number;
+            /** Zones */
+            zones: string[];
+        };
+        /**
+         * PlannerView
+         * @description Zone opportunity over a shift window (an estimate, not one taxi's earnings).
+         */
+        PlannerView: {
+            /** Available */
+            available: boolean;
+            /** Champion */
+            champion: string | null;
+            /** Day Type */
+            day_type: string | null;
+            /** Forecast Month */
+            forecast_month: string | null;
+            /** Hours */
+            hours: number[];
+            /** Message */
+            message: string | null;
+            /**
+             * Recent Days
+             * @default 0
+             */
+            recent_days: number;
+            /** Recent From */
+            recent_from: string | null;
+            /** Recent To */
+            recent_to: string | null;
+            /** Revenue Champion */
+            revenue_champion: string | null;
+            /** Tables */
+            tables: {
+                [key: string]: components["schemas"]["OverviewTable"];
+            };
+            /** Unknown Zones */
+            unknown_zones: string[];
+            /** Zones */
+            zones: components["schemas"]["PlannerZone"][];
+        };
+        /**
+         * PlannerZone
+         * @description One zone over the chosen window: forecast for a typical matching day of next month,
+         *     and what was recorded there over the recent weeks.
+         */
+        PlannerZone: {
+            /** Borough */
+            borough: string;
+            /** Demand Tier */
+            demand_tier: string;
+            /** Expected Revenue */
+            expected_revenue: number | null;
+            /** Expected Trips */
+            expected_trips: number;
+            /** Fare Per Ride Hour */
+            fare_per_ride_hour: number | null;
+            /** Fare Per Trip */
+            fare_per_trip: number | null;
+            /** Low Confidence */
+            low_confidence: boolean;
+            /** Miles Per Trip */
+            miles_per_trip: number | null;
+            /** Minutes Per Trip */
+            minutes_per_trip: number | null;
+            /** Recent Median */
+            recent_median: number | null;
+            /** Recent P10 */
+            recent_p10: number | null;
+            /** Recent P90 */
+            recent_p90: number | null;
+            /** Recorded Trips */
+            recorded_trips: number;
+            /** Ride Hours */
+            ride_hours: number | null;
+            /** Zone Name */
+            zone_name: string;
+        };
         /** Provenance */
         Provenance: {
             /** Active Filters */
@@ -804,6 +936,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OverviewView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    plan_shift_planner_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlannerBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlannerView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    planner_zones_planner_zones_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OverviewTable"];
                 };
             };
             /** @description Validation Error */

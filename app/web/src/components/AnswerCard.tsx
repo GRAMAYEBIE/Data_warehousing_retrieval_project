@@ -171,7 +171,11 @@ export default function AnswerCard({ answer, units, labels, onFollowUp, streamed
     >
       <motion.div className="space-y-4 p-5" variants={reduce ? undefined : SEQUENCE} initial="hidden" animate="show">
         <motion.div variants={STEP} className="flex flex-wrap items-center gap-2 text-xs">
-          {verified ? (
+          {prov?.data_layer.startsWith("ml") ? (
+            <span className="chip border-accent/40 bg-accent/15 text-ink" title="From the published forecast, written by code: an estimate, not a measured figure">
+              <Info size={12} aria-hidden="true" /> Estimate · forecast
+            </span>
+          ) : verified ? (
             <span className="chip border-good/30 bg-good/10 text-good-ink">
               <Check size={12} strokeWidth={3} aria-hidden="true" /> Numbers verified
             </span>

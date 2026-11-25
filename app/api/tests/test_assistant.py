@@ -655,3 +655,248 @@ def test_the_forecast_page_reads_the_published_run_only():
             raise psycopg.errors.UndefinedTable("relation ml.current_run does not exist")
 
     assert forecast.compute(NoSchema())["available"] is False
+
+
+# ------------------------------------------------------------------ shift planner
+def test_a_shift_window_wraps_past_midnight():
+    from assistant import planner
+
+    assert planner.window(22, 4) == [22, 23, 0, 1]
+    assert planner.window(7, 1) == [7]
+    assert planner.month_end("2025-02").isoformat() == "2025-02-28"
+
+
+def test_the_recent_range_counts_days_without_trips_as_zero():
+    from assistant import planner
+
+    # 2 recorded days out of 10 matching days: most days had no trip in the window.
+    low, median, high = planner.recent_range([30.0, 40.0], 10)
+    assert low == 0 and median == 0 and high > 0
+    assert planner.recent_range([], 0) is None
+
+
+def test_the_planner_sums_the_window_and_averages_per_trip():
+    from assistant import planner
+
+    profile = [
+        {"zone_name": "Midtown Center", "borough": "Manhattan", "pickup_hour": h,
+         "trips": 50.0, "lower": 40.0, "upper": 60.0, "revenue": 1250.0,
+         "demand_tier": "high", "low_confidence": False, "days": 20}
+        for h in (8, 9)
+    ]  # fmt: skip
+    history = [
+        {"zone_name": "Midtown Center", "date_day": "2025-05-01", "trips": 90.0,
+         "amount": 2250.0, "minutes": 1350.0, "miles": 180.0},
+        {"zone_name": "Midtown Center", "date_day": "2025-05-02", "trips": 110.0,
+         "amount": 2750.0, "minutes": 1650.0, "miles": 220.0},
+    ]  # fmt: skip
+    [zone] = planner.summarise(profile, history, days=2)
+    assert zone["expected_trips"] == 100 and zone["expected_revenue"] == 2500
+    # Averages per trip are ratios of sums, not means of daily ratios.
+    assert zone["fare_per_trip"] == 25 and zone["minutes_per_trip"] == 15
+    assert zone["miles_per_trip"] == 2
+    assert zone["ride_hours"] == 25  # 100 trips x 15 minutes
+    assert zone["fare_per_ride_hour"] == 100
+    # A revenue missing for one hour gives no revenue total rather than a partial one.
+    profile[1]["revenue"] = None
+    assert planner.summarise(profile, history, days=2)[0]["expected_revenue"] is None
+
+
+def test_the_planner_reads_the_published_forecast_with_bounded_queries():
+    import psycopg
+
+    from assistant import planner
+
+    class PlannerStore:
+        def __init__(self):
+            self.calls = []
+
+        def query(self, sql, params):
+            self.calls.append((sql, params))
+            if "ml.current_run" in sql:
+                return (["forecast_month", "validated_month", "champion", "revenue_champion"],
+                        [("2025-06", "2025-05", "baseline", "baseline")], 1)  # fmt: skip
+            if "count(*) AS days" in sql:
+                return ["days"], [(40,)], 1
+            if "f.zone_name = ANY" in sql:
+                columns = ["zone_name", "borough", "pickup_hour", "trips", "lower", "upper",
+                           "revenue", "demand_tier", "low_confidence", "days"]  # fmt: skip
+                return columns, [("JFK Airport", "Queens", 23, 80.0, 60.0, 100.0, 5000.0,
+                                  "high", False, 21)], 1  # fmt: skip
+            return ["zone_name"], [], 0
+
+    store = PlannerStore()
+    page = planner.plan(store, ["JFK Airport", "Nowhere", "JFK Airport"], "weekday", 23, 2)
+    assert page["available"] and page["hours"] == [23, 0]
+    assert page["unknown_zones"] == ["Nowhere"] and page["recent_to"] == "2025-05-31"
+    assert page["zones"][0]["expected_trips"] == 80
+    sql_calls = [sql for sql, _ in store.calls if "ml.current_run" not in sql]
+    assert sql_calls and all("LIMIT" in sql or "count(*)" in sql for sql in sql_calls)
+    # Values go in as parameters, never into the SQL text.
+    assert all("JFK" not in sql for sql, _ in store.calls)
+    assert all(params.get("zones", ["JFK Airport", "Nowhere"]) == ["JFK Airport", "Nowhere"]
+               for _, params in store.calls)  # fmt: skip
+    with pytest.raises(ValueError):
+        planner.plan(store, ["JFK Airport"], "holiday'; --", 8, 8)
+
+    class NoSchema:
+        def query(self, sql, params):
+            raise psycopg.errors.InvalidSchemaName("schema ml does not exist")
+
+    assert planner.plan(NoSchema(), ["JFK Airport"], "all", 8, 8)["available"] is False
+    assert planner.zones(NoSchema())["rows"] == []
+
+
+# ------------------------------------------------------------------ forecast questions
+def test_forecast_questions_are_told_apart_from_questions_on_recorded_months():
+    from assistant.forecast_questions import wants_forecast
+
+    assert wants_forecast("How many trips are expected in Manhattan next month?", CATALOG)
+    assert wants_forecast("Which zones will be busiest?", CATALOG)
+    assert wants_forecast("Trips in March 2025", CATALOG)  # after the published months
+    assert not wants_forecast("Trips in January 2025", CATALOG)
+    assert not wants_forecast("How many trips last month?", CATALOG)
+    assert not wants_forecast("Which zones had more trips than expected last month?", CATALOG)
+    assert not wants_forecast("How does the forecast work?", CATALOG)  # a conversation
+
+
+def test_the_scope_of_a_forecast_question_is_read_by_code():
+    from assistant.forecast_questions import hours_named, read
+
+    assert hours_named("between 7 and 10am") == [7, 8, 9]
+    assert hours_named("from 10pm to 2am") == [22, 23, 0, 1]
+    assert hours_named("at 8pm and at 9:00") == [20, 9]
+    ask = read("Which zones will be busiest on weekends in Manhattan? Top 3", CATALOG)
+    assert (ask.by, ask.boroughs, ask.day_type, ask.limit) == ("pickup_zone", ["Manhattan"],
+                                                                "weekend", 3)  # fmt: skip
+    one = read("Expected trips at JFK Airport next month", CATALOG)
+    assert one.by is None and one.zones == ["JFK Airport"]
+    assert read("Expected revenue by hour next month", CATALOG).target == "revenue"
+    assert read("Expected revenue by hour next month", CATALOG).by == "pickup_hour"
+    assert read("quietest boroughs next month?", CATALOG).quiet
+
+
+class ForecastStore(FakeStore):
+    """The ml schema of a published forecast for 2025-03 (after the catalogue's months)."""
+
+    def __init__(self, published=True):
+        super().__init__()
+        self.published, self.calls = published, []
+
+    def query(self, sql, params):
+        import psycopg
+
+        self.calls.append((sql, params))
+        if "ml.current_run" in sql or "ml.current_revenue_run" in sql:
+            if not self.published:
+                raise psycopg.errors.InvalidSchemaName("schema ml does not exist")
+            columns = ["run_id", "data_run", "created_at", "history_months", "forecast_month",
+                       "champion"]  # fmt: skip
+            return columns, [("r1", "load_2025_02", "2026-11-24 10:00", ["2025-01", "2025-02"],
+                              "2025-03", "baseline")], 1  # fmt: skip
+        if "forecast_backtest" in sql:
+            return ["wmape", "months"], [(0.079, 3)], 1
+        if "_per_day" in sql:
+            return ["trips", "trips_per_day"], [(3_850_000.4, 124_193.6)], 1
+        if "AS pickup_zone" in sql:
+            return ["pickup_zone", "trips"], [("JFK Airport", 160_000.0)], 1
+        return ["pickup_borough", "trips"], [("Manhattan", 3_000_000.0), ("Queens", 500_000.0)], 2
+
+
+def test_a_forecast_question_is_answered_by_code_as_an_estimate():
+    store = ForecastStore()
+    a = assistant(store=store)
+    answer = a.ask("How many trips are expected in Manhattan next month?")
+    assert answer.status == "answered" and a.llm.calls == 0  # no model for a forecast
+    assert answer.provenance.data_layer.startswith("ml (published forecast")
+    assert answer.provenance.metrics[0].is_estimate
+    assert answer.provenance.period_resolved["period"] == "2025-03"
+    assert answer.rows == [[3_850_000, 124_194]] and "Estimate for March 2025" in answer.narrative
+    assert "3,850,000" in answer.narrative and "7.9 %" in answer.limitations[0]
+    assert answer.narrative_check == "replaced"  # the fake model wrote nothing: code's text
+    assert any("cannot be added up" in note for note in answer.limitations)
+    sql, params = store.calls[1]
+    assert params == {"boroughs": ["Manhattan"]} and "Manhattan" not in sql
+    assert store.audited[-1]["verdict"] == "answered"
+
+    # A short follow-up keeps the forecast and changes what it names.
+    again = a.ask("And for Queens?", answer.session_id)
+    assert again.status == "answered" and a.llm.calls == 0
+    assert store.calls[-2][1] == {"boroughs": ["Queens"]}
+
+
+def test_forecast_questions_outside_what_is_forecast_are_refused():
+    a = assistant(store=ForecastStore())
+    fare = a.ask("What average fare is expected next month?")
+    assert fare.status == "unsupported" and "Only trips and revenue are forecast" in fare.narrative
+    other = a.ask("How many trips will there be in May 2025?")
+    assert other.status == "rejected" and "March 2025 only" in other.narrative
+    none = assistant(store=ForecastStore(published=False)).ask("Expected trips next month?")
+    assert none.status == "unsupported" and "no forecast is published yet" in none.narrative
+
+
+def test_a_forecast_by_day_for_one_borough_carries_its_80_percent_range():
+    from assistant.forecast_questions import build, read
+
+    sql, params, columns, with_range = build(read("Expected trips each day in Queens", CATALOG))
+    assert with_range and "current_forecast_daily" in sql and params == {"borough": "Queens"}
+    assert columns[-2:] == ["trips_low_80", "trips_high_80"]
+    sql, _, _, with_range = build(read("Expected trips each day next month", CATALOG))
+    assert not with_range and "LIMIT 31" in sql  # a city-wide day is a sum: no valid range
+
+
+def test_a_new_forecast_question_does_not_inherit_the_previous_place():
+    store = ForecastStore()
+    a = assistant(store=store)
+    first = a.ask("How many trips are expected in Manhattan next month?")
+    a.ask("Which zones will be busiest next month?", first.session_id)
+    assert "boroughs" not in store.calls[-2][1]  # Manhattan not carried over
+
+
+def test_the_model_words_a_forecast_and_its_numbers_are_checked():
+    good = "About **3,850,000 trips** are expected in Manhattan in March 2025."
+    a = assistant(narrative=good, store=ForecastStore())
+    answer = a.ask("How many trips are expected in Manhattan next month?")
+    assert answer.narrative == good and answer.narrative_check == "passed"
+    assert "worded by the model" in answer.reasons[0]
+
+    invented = "About **4,100,000 trips** are expected in Manhattan."
+    answer = assistant(narrative=invented, store=ForecastStore()).ask(
+        "How many trips are expected in Manhattan next month?"
+    )
+    assert answer.narrative_check == "replaced" and "Estimate for March 2025" in answer.narrative
+    assert any("4.1e+06" in r or "4100000" in r for r in answer.reasons)
+
+    recorded = "Manhattan had **3,850,000 trips** in March 2025."  # not worded as an estimate
+    answer = assistant(narrative=recorded, store=ForecastStore()).ask(
+        "How many trips are expected in Manhattan next month?"
+    )
+    assert answer.narrative_check == "replaced"
+    assert any("not worded as an estimate" in r for r in answer.reasons)
+
+
+def test_a_forecast_figure_must_belong_to_the_hour_or_day_it_is_quoted_with():
+    from assistant.forecast_questions import ForecastAsk, ForecastResult, check_model_text
+
+    def result(columns, rows):
+        return ForecastResult(None, columns, rows, "", [], "", {}, {"forecast_month": "2025-06"})
+
+    hours = result(["pickup_hour", "trips"], [[4, 912], [17, 8344], [18, 8728]])
+    ask = ForecastAsk(by="pickup_hour")
+    # Observed on the lab machine: 8,728 is the figure of 18:00, not 17:00.
+    wrong = "**About 8,728 trips** are expected during the peak hour of 17:00 on an average day."
+    assert "wrong member" in check_model_text(wrong, ask, hours)
+    right = "**About 8,728 trips** are expected at 18:00, the busiest hour; 4 am is quietest."
+    assert check_model_text(right, ask, hours) is None
+    assert check_model_text("About **8,728 trips** are expected at 6 pm.", ask, hours) is None
+
+    days = result(
+        ["period", "trips", "trips_low_80", "trips_high_80"],
+        [["2025-06-01", 6658, 5845, 10739], ["2025-06-30", 2600, 2300, 4200]],
+    )
+    day_ask = ForecastAsk(by="day", boroughs=["Brooklyn"])
+    # Observed: the busiest day's figure given to 1 June "and 30th".
+    claim = "**About 6,658 trips** are expected in Brooklyn on June 1st and 30th."
+    assert "wrong member" in check_model_text(claim, day_ask, days)
+    fine = "The busiest day is expected on 1 June, with **about 6,658 trips** (5,845 to 10,739)."
+    assert check_model_text(fine, day_ask, days) is None

@@ -149,6 +149,45 @@ class ForecastView(Contract):
     tables: dict[str, OverviewTable] = Field(default_factory=dict)
 
 
+class PlannerZone(Contract):
+    """One zone over the chosen window: forecast for a typical matching day of next month,
+    and what was recorded there over the recent weeks."""
+
+    zone_name: str
+    borough: str
+    demand_tier: str
+    low_confidence: bool
+    expected_trips: float
+    expected_revenue: float | None  # USD; None without a revenue forecast
+    recent_p10: float | None  # trips in the window per matching day, recent weeks
+    recent_median: float | None
+    recent_p90: float | None
+    recorded_trips: float
+    fare_per_trip: float | None  # USD, total amount
+    minutes_per_trip: float | None
+    miles_per_trip: float | None
+    ride_hours: float | None  # expected trips x minutes per trip: paid ride time demanded
+    fare_per_ride_hour: float | None  # USD per hour with a passenger (idle time excluded)
+
+
+class PlannerView(Contract):
+    """Zone opportunity over a shift window (an estimate, not one taxi's earnings)."""
+
+    available: bool
+    message: str | None = None
+    forecast_month: str | None = None
+    recent_from: str | None = None
+    recent_to: str | None = None
+    recent_days: int = 0
+    champion: str | None = None
+    revenue_champion: str | None = None
+    day_type: str | None = None
+    hours: list[int] = Field(default_factory=list)
+    unknown_zones: list[str] = Field(default_factory=list)
+    zones: list[PlannerZone] = Field(default_factory=list)
+    tables: dict[str, OverviewTable] = Field(default_factory=dict)  # profile, alternatives, history
+
+
 class Rejection(Contract):
     """Body of a 422: the request was refused, with the reasons."""
 
