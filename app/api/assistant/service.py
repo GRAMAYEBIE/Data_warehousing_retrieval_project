@@ -680,7 +680,7 @@ class Assistant:
                 text = self.llm.chat(
                     load_prompt("narrate"),
                     fq.model_message(question, ask, result, meta["label"]),
-                    max_tokens=160,
+                    max_tokens=320,
                     **self.token_stream(),
                 ).strip()
                 problem = fq.check_model_text(text, ask, result)

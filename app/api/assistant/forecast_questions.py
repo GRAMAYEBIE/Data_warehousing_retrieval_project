@@ -428,7 +428,8 @@ def formatted(value, target: str, unit: str) -> str:
 
 
 ESTIMATE_WORDS = re.compile(
-    r"\b(expect\w*|estimat\w*|forecast\w*|predict\w*|projected|likely|anticipat\w*)\b",
+    r"\b(expect\w*|estimat\w*|forecast\w*|predict\w*|projected|likely|anticipat\w*|will|"
+    r"next month)\b",
     re.IGNORECASE,
 )
 LABELS = {
@@ -437,6 +438,71 @@ LABELS = {
     "pickup_hour": "Pickup hour",
     "period": "Day",
 }
+
+
+def key_facts(ask: ForecastAsk, result: ForecastResult) -> tuple[str, list[float]]:
+    """Facts computed by code for the narrator, already sorted and formatted, and the extra
+    figures they quote (weekday averages), which the number check then accepts. Observed:
+    reading a 24-row table, the model gave one hour's figure to another; reading 30 days,
+    it called Mondays busy when they are the quietest."""
+    metric = METRIC[ask.target]
+    unit = "USD" if ask.target == "revenue" else "trips"
+
+    def f(value) -> str:
+        return formatted(value, ask.target, unit)
+
+    data = [dict(zip(result.columns, r, strict=True)) for r in result.rows]
+    ranked = sorted(data, key=lambda r: r[metric], reverse=True)
+    facts, extra = (
+        [result.narrative.removesuffix(" This is an estimate, not a measured figure.")],
+        [],
+    )
+    if ask.by == "pickup_hour":
+        facts.append(
+            "Busiest hours, in order: "
+            + ", ".join(f"{r['pickup_hour']:02d}:00 ({f(r[metric])})" for r in ranked[:5])
+            + "."
+        )
+        facts.append(
+            "Quietest hours: "
+            + ", ".join(f"{r['pickup_hour']:02d}:00 ({f(r[metric])})" for r in ranked[-3:][::-1])
+            + "."
+        )
+    elif ask.by == "day":
+
+        def day(r) -> str:  # "Sunday 1 June"
+            d = date.fromisoformat(r["period"])
+            return f"{d:%A} {d.day} {d:%B}"
+
+        facts.append(
+            "Busiest days, in order: "
+            + ", ".join(f"{day(r)} ({f(r[metric])})" for r in ranked[:3])
+            + "."
+        )
+        facts.append(
+            "Quietest days: "
+            + ", ".join(f"{day(r)} ({f(r[metric])})" for r in ranked[-2:][::-1])
+            + "."
+        )
+        by_weekday: dict[str, list[float]] = {}
+        for r in data:
+            name = date.fromisoformat(r["period"]).strftime("%A")
+            by_weekday.setdefault(name, []).append(float(r[metric]))
+        averages = {name: sum(v) / len(v) for name, v in by_weekday.items()}
+        order = sorted(averages, key=averages.get, reverse=True)
+        extra = [round(averages[name]) for name in order]
+        facts.append(
+            "Average per weekday, highest first: "
+            + ", ".join(f"{name} {f(round(averages[name]))}" for name in order)
+            + "."
+        )
+    elif ask.by in ("pickup_zone", "pickup_borough"):
+        facts.append(
+            "Ranking, expected over the month: "
+            + "; ".join(f"{i}. {r[ask.by]} ({f(r[metric])})" for i, r in enumerate(data[:10], 1))
+            + "."
+        )
+    return " ".join(facts), extra + [80.0]  # "80 % range"
 
 
 def model_message(question: str, ask: ForecastAsk, result: ForecastResult, label: str) -> str:
@@ -469,11 +535,16 @@ def model_message(question: str, ask: ForecastAsk, result: ForecastResult, label
         f"PERIOD: {_month(result.run['forecast_month'])} (the forecast month)\n"
         f"FILTERS: {scope_text(ask).strip() or 'none'}\n"
         f"RESULT{per.get(ask.by or '', '' if ask.by else ' (whole month)')}:\n{table}\n\n"
-        f"KEY FACTS (computed by code, correct): {result.narrative}\n\n"
-        "THIS IS A FORECAST. Rewrite the KEY FACTS as ONE or TWO short sentences that answer "
-        "the QUESTION: the key figure in **bold**, worded as an estimate ('about ... are "
-        "expected'), never as something that happened. Keep each figure with its own zone, "
-        "hour or day. No bullet list, no other number, no hypothesis."
+        f"KEY FACTS (computed by code, correct; prefer them to reading the table): "
+        f"{key_facts(ask, result)[0]}\n\n"
+        "THIS IS A FORECAST of next month. Write the answer like any other (rules above): the "
+        "direct answer first, with the key figure in **bold**, then what helps read it. A "
+        "bullet list only for a ranking of several rows, never to repeat one or two figures. "
+        "Word every figure as an estimate ('about ... are expected'), never as something that "
+        "happened. Use only the figures of the KEY FACTS and the RESULT, each with its own "
+        "zone, hour, day or weekday. One possible explanation is welcome, worded as a "
+        "hypothesis, without numbers, about the pattern itself (time of day, day of the week, "
+        "airports, nightlife, commuting), not about the economy."
     )
 
 
@@ -490,55 +561,94 @@ MEMBER_COLUMN = {
 }
 
 
-def named_rows(sentence: str, ask: ForecastAsk, result: ForecastResult) -> set[int]:
-    """Rows of the result whose member (zone, borough, hour, day) the sentence names."""
+JOINED = re.compile(r"^\s*(,|and|or|&|, and|, or)\s*$")  # "1st and 30th", "17:00, 18:00"
+
+
+def mentions(sentence: str, ask: ForecastAsk, result: ForecastResult) -> list[tuple]:
+    """(start, end, rows) of each zone, borough, hour or day the sentence names."""
     column = result.columns.index(MEMBER_COLUMN[ask.by])
     text = sentence.lower()
+    found = []
     if ask.by in ("pickup_zone", "pickup_borough"):
-        return {i for i, r in enumerate(result.rows) if str(r[column]).lower() in text}
-    if ask.by == "pickup_hour":  # "17:00", "5 pm", "5:30pm"
-        hours = {
-            _hour(h, suffix or None)
-            for h, suffix in re.findall(r"\b(\d{1,2})(?::\d\d)?\s*(am|pm)\b", text)
-            + re.findall(r"\b(\d{1,2}):\d\d\b()", text)
-        }
-        return {i for i, r in enumerate(result.rows) if r[column] in hours}
-    days = {int(d) for d in re.findall(r"\b(\d{1,2})(?:st|nd|rd|th)\b", text)}
-    days |= {int(d) for d in re.findall(rf"\b{MONTH_WORDS}\s+(\d{{1,2}})\b", text)}
-    days |= {int(d) for d in re.findall(rf"\b(\d{{1,2}})\s+{MONTH_WORDS}\b", text)}
-    days |= {int(d) for d in re.findall(r"\b20\d\d-\d\d-(\d\d)\b", text)}
-    return {i for i, r in enumerate(result.rows) if int(str(r[column])[-2:]) in days}
+        for i, r in enumerate(result.rows):
+            for m in re.finditer(re.escape(str(r[column]).lower()), text):
+                found.append((m.start(), m.end(), {i}))
+        # The longest name at a place ("Upper East Side South", not "Upper East Side").
+        found = [
+            f for f in found
+            if not any(g[0] <= f[0] and f[1] <= g[1] and g[1] - g[0] > f[1] - f[0] for g in found)
+        ]  # fmt: skip
+    elif ask.by == "pickup_hour":  # "17:00", "5 pm", "5:30pm"
+        for m in re.finditer(r"\b(\d{1,2})(?::\d\d)?\s*(am|pm)\b|\b(\d{1,2}):\d\d\b", text):
+            hour = _hour(m.group(1), m.group(2)) if m.group(1) else _hour(m.group(3), None)
+            found.append((m.start(), m.end(), {i for i, r in enumerate(result.rows)
+                                               if r[column] == hour}))  # fmt: skip
+    else:
+        patterns = [
+            r"\b(\d{1,2})(?:st|nd|rd|th)\b",
+            rf"\b{MONTH_WORDS}\s+(\d{{1,2}})\b",
+            rf"\b(\d{{1,2}})\s+{MONTH_WORDS}\b",
+            r"\b20\d\d-\d\d-(\d\d)\b",
+        ]
+        for pattern in patterns:
+            for m in re.finditer(pattern, text):
+                rows = {i for i, r in enumerate(result.rows)
+                        if int(str(r[column])[-2:]) == int(m.group(1))}  # fmt: skip
+                found.append((m.start(), m.end(), rows))
+        found = [f for f in found if not any(g != f and g[0] <= f[0] and f[1] <= g[1]
+                                             for g in found)]  # fmt: skip
+    return sorted(found, key=lambda f: f[0])
 
 
 def misattributed(text: str, ask: ForecastAsk, result: ForecastResult) -> list[str]:
-    """A figure quoted next to a zone, hour or day must be that member's own figure.
+    """A figure must belong to the zone, hour or day it is quoted with: the member nearest
+    to it, and every member listed together with that one ("June 1st and 30th").
     Observed: "8,728 trips at the peak hour of 17:00" (8,728 is 18:00), "6,658 trips on
-    June 1st and 30th" (only 1 June); the number check passes both."""
-    from assistant.guards import _matches, _numbers_in
+    June 1st and 30th" (only 1 June); the number check passes both. Accepted: "starts
+    around 17:00 and peaks at 18:00, with about 8,728 trips"."""
+    from assistant.guards import NUMBER, _matches, _numbers_in
 
     if ask.by is None:
         return []
+    metric = METRIC[ask.target]
+    own = [
+        [float(v) for c, v in zip(result.columns, r, strict=True)
+         if c.startswith(metric) and v is not None]
+        for r in result.rows
+    ]  # fmt: skip
+    member = result.columns.index(MEMBER_COLUMN[ask.by])
     problems = []
     for sentence in SENTENCES.split(text):
-        numbers = [
-            n for n in _numbers_in(sentence)
-            if not (float(n).is_integer() and (abs(n) < 32 or 1990 <= n <= 2100))
-        ]  # fmt: skip
-        rows = named_rows(sentence, ask, result)
-        if not numbers or not rows:
+        named = mentions(sentence, ask, result)
+        if not named:
             continue
-        values = {
-            i: [float(v) for c, v in zip(result.columns, result.rows[i], strict=True)
-                if c.startswith(METRIC[ask.target]) and v is not None]
-            for i in rows
-        }  # fmt: skip
-        member = result.columns.index(MEMBER_COLUMN[ask.by])
-        for i, own in values.items():
-            if not any(_matches(n, own) for n in numbers):
-                problems.append(f"{result.rows[i][member]} quoted with a figure of another row")
-        for n in numbers:
-            if not any(_matches(n, own) for own in values.values()):
-                problems.append(f"{n:g} quoted next to members it does not belong to")
+        groups, current = [], [named[0]]
+        for previous, mention in zip(named, named[1:], strict=False):
+            if JOINED.match(sentence.lower()[previous[1] : mention[0]]):
+                current.append(mention)
+            else:
+                groups.append(current)
+                current = [mention]
+        groups.append(current)
+        # "80 % range" is a label, not a figure; blanked so positions stay the same.
+        blanked = re.sub(r"\b80\s*%", lambda m: " " * len(m.group(0)), sentence)
+        for match in NUMBER.finditer(blanked):
+            values = _numbers_in(match.group(0))
+            if not values or (
+                float(values[0]).is_integer() and (abs(values[0]) < 32 or 1990 <= values[0] <= 2100)
+            ):
+                continue  # fmt: skip
+            n = values[0]
+            if any(m[0] <= match.start() < m[1] for m in named):
+                continue  # part of a member's name or time ("18:00")
+
+            s, e = match.start(), match.end()
+            nearest = min(named, key=lambda m, s=s, e=e: max(m[0] - e, s - m[1], 0))
+            group = next(g for g in groups if nearest in g)
+            for mention in group:
+                if not any(_matches(n, own[i]) for i in mention[2]):
+                    shown = ", ".join(str(result.rows[i][member]) for i in mention[2]) or "?"
+                    problems.append(f"{n:g} quoted with {shown}, whose figure it is not")
     return problems
 
 
@@ -548,7 +658,7 @@ def check_model_text(text: str, ask: ForecastAsk, result: ForecastResult) -> str
 
     if not text:
         return "empty text"
-    bad = unsupported_numbers(text, result.rows)
+    bad = unsupported_numbers(text, result.rows, allowed=key_facts(ask, result)[1])
     if bad:
         return "number(s) not in the result: " + ", ".join(f"{n:g}" for n in bad)
     wrong = wrong_rankings(text, result.columns, result.rows, METRIC[ask.target])

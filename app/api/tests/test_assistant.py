@@ -888,6 +888,13 @@ def test_a_forecast_figure_must_belong_to_the_hour_or_day_it_is_quoted_with():
     assert "wrong member" in check_model_text(wrong, ask, hours)
     right = "**About 8,728 trips** are expected at 18:00, the busiest hour; 4 am is quietest."
     assert check_model_text(right, ask, hours) is None
+    # Observed and correct: another hour named without a figure of its own.
+    rush = "The rush is expected to start around 17:00 and peak at 18:00, with about 8,728 trips."
+    assert check_model_text(rush, ask, hours) is None
+    listed = "- **18:00**: 8,728 trips\n- **17:00**: 8,344 trips\n- **04:00**: 912 trips"
+    assert check_model_text("About " + listed + " are expected.", ask, hours) is None
+    swapped = "About 8,344 trips are expected at 18:00 and 8,728 at 17:00."
+    assert "wrong member" in check_model_text(swapped, ask, hours)
     assert check_model_text("About **8,728 trips** are expected at 6 pm.", ask, hours) is None
 
     days = result(
@@ -900,3 +907,30 @@ def test_a_forecast_figure_must_belong_to_the_hour_or_day_it_is_quoted_with():
     assert "wrong member" in check_model_text(claim, day_ask, days)
     fine = "The busiest day is expected on 1 June, with **about 6,658 trips** (5,845 to 10,739)."
     assert check_model_text(fine, day_ask, days) is None
+
+
+def test_key_facts_give_the_narrator_sorted_figures_and_weekday_averages():
+    from assistant.forecast_questions import (
+        ForecastAsk,
+        ForecastResult,
+        check_model_text,
+        key_facts,
+    )
+
+    days = ForecastResult(
+        None,
+        ["period", "trips", "trips_low_80", "trips_high_80"],
+        [["2025-06-01", 6658, 5845, 10739], ["2025-06-02", 2509, 2203, 4047],
+         ["2025-06-08", 6458, 5600, 10100], ["2025-06-09", 2511, 2210, 4050]],
+        "Estimate for June 2025 in Brooklyn: ...",
+        [], "", {}, {"forecast_month": "2025-06"},
+    )  # fmt: skip
+    ask = ForecastAsk(by="day", boroughs=["Brooklyn"])
+    facts, extra = key_facts(ask, days)
+    assert "Busiest days, in order: Sunday 1 June (6,658), Sunday 8 June (6,458)" in facts
+    assert "Average per weekday, highest first: Sunday 6,558, Monday 2,510" in facts
+    assert 6558 in extra and 80.0 in extra
+    # A weekday average and "80 % range" are quotable; the figures stay with their day.
+    text = ("**About 6,658 trips** are expected on Sunday 1 June (80 % range 5,845 to 10,739). "
+            "Sundays average about 6,558 trips, Mondays about 2,510.")  # fmt: skip
+    assert check_model_text(text, ask, days) is None

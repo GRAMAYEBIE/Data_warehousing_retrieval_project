@@ -4,6 +4,7 @@ import { type ReactNode, useState } from "react";
 import type { Answer } from "../api/client";
 import { filterText, formatValue, seconds } from "../lib/format";
 import DataTable from "./DataTable";
+import ForecastAnswerChart from "./ForecastAnswerChart";
 import Markdown from "./Markdown";
 import { CountUp, ease } from "./motion";
 import ResultChart from "./ResultChart";
@@ -75,6 +76,7 @@ export default function AnswerCard({ answer, units, labels, onFollowUp, streamed
   const period = monthsText(prov?.period_resolved?.period);
   const compared = monthsText(prov?.period_resolved?.compared_with);
   const lowQuality = prov?.valid_trip_rate != null && prov.valid_trip_rate < 0.85;
+  const estimate = Boolean(prov?.data_layer.startsWith("ml"));
 
   const copy = async () => {
     try {
@@ -171,7 +173,7 @@ export default function AnswerCard({ answer, units, labels, onFollowUp, streamed
     >
       <motion.div className="space-y-4 p-5" variants={reduce ? undefined : SEQUENCE} initial="hidden" animate="show">
         <motion.div variants={STEP} className="flex flex-wrap items-center gap-2 text-xs">
-          {prov?.data_layer.startsWith("ml") ? (
+          {estimate ? (
             <span className="chip border-accent/40 bg-accent/15 text-ink" title="From the published forecast, written by code: an estimate, not a measured figure">
               <Info size={12} aria-hidden="true" /> Estimate · forecast
             </span>
@@ -198,7 +200,13 @@ export default function AnswerCard({ answer, units, labels, onFollowUp, streamed
           <span className="num ml-auto text-ink-3">{seconds(answer.duration_ms)}</span>
         </motion.div>
 
-        {headline.length > 0 && (
+        {estimate && answer.rows.length > 0 && (
+          <motion.div variants={STEP} className={answer.rows.length > 1 ? "rounded-input border border-line p-3" : ""}>
+            <ForecastAnswerChart answer={answer} units={units} labels={labels} month={period} />
+          </motion.div>
+        )}
+
+        {!estimate && headline.length > 0 && (
           <motion.div variants={STEP} className={`grid gap-3 ${headline.length > 1 ? "sm:grid-cols-2" : ""}`}>
             {headline.map((m) => (
               <Headline key={m} label={label(m)} unit={units[m] ?? ""} metric={m} row={row} compared={compared} />
@@ -206,7 +214,7 @@ export default function AnswerCard({ answer, units, labels, onFollowUp, streamed
           </motion.div>
         )}
 
-        {answer.rows.length > 1 && (
+        {!estimate && answer.rows.length > 1 && (
           <motion.div variants={STEP} className="rounded-input border border-line p-3">
             <ResultChart columns={answer.columns} rows={answer.rows} metrics={metrics} units={units} labels={labels} />
             {plan?.grain === "week" && answer.columns.includes("period") && (
