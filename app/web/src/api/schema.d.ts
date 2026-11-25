@@ -353,10 +353,14 @@ export interface components {
         ForecastRun: {
             /** Baseline Wmape */
             baseline_wmape: number | null;
+            /** Champion */
+            champion: string;
             /** Created At */
             created_at: string;
             /** Data Run */
             data_run: string;
+            /** Decision */
+            decision: string | null;
             /** Forecast Month */
             forecast_month: string;
             /** History Months */
@@ -406,6 +410,9 @@ export interface components {
             evaluation: components["schemas"]["ForecastScore"][];
             /** Message */
             message: string | null;
+            /** Revenue Evaluation */
+            revenue_evaluation: components["schemas"]["ForecastScore"][];
+            revenue_run: components["schemas"]["ForecastRun"] | null;
             run: components["schemas"]["ForecastRun"] | null;
             /** Tables */
             tables: {

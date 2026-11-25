@@ -629,20 +629,26 @@ def test_the_forecast_page_reads_the_published_run_only():
 
         def query(self, sql, params):
             self.sql.append(sql)
+            if "ml.current_revenue_run" in sql:
+                return ["run_id"], [], 1  # no revenue forecast yet: the page still works
             if "ml.current_run" in sql:
                 columns = ["run_id", "data_run", "created_at", "history_months",
                            "validated_month", "forecast_month", "model", "rounds", "wmape",
-                           "baseline_wmape"]  # fmt: skip
+                           "baseline_wmape", "champion", "decision"]  # fmt: skip
                 return columns, [("r1", "load_2025_05", "2026-11-24", ["2025-05"], "2025-05",
-                                  "2025-06", "lightgbm", 300, 0.208, 0.213)], 1  # fmt: skip
+                                  "2025-06", "lightgbm", 300, 0.213, 0.213, "baseline",
+                                  "baseline kept in service")], 1  # fmt: skip
             assert params["run"] == "r1" and params["month"] == "2025-05-01"
             return ["borough", "predicted"], [("Manhattan", 1.0)], 1
 
     store = ForecastStore()
     page = forecast.compute(store)
     assert page["available"] and page["run"]["forecast_month"] == "2025-06"
-    assert set(page["tables"]) == {"daily", "zones", "hourly", "last_actual"}
-    assert all("LIMIT" in sql for sql in store.sql[1:] if "forecast_evaluation" not in sql)
+    assert page["run"]["champion"] == "baseline" and page["revenue_run"] is None
+    assert set(page["tables"]) == {"backtests", "daily", "zones", "hourly", "last_actual"}
+    # Every table query is bounded (the run and evaluation queries return a handful of rows).
+    tables = [s for s in store.sql if "forecast_evaluation" not in s and "current_" not in s]
+    assert tables and all("LIMIT" in sql for sql in tables)
 
     class NoSchema:
         def query(self, sql, params):

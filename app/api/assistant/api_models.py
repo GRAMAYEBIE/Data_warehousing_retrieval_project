@@ -118,6 +118,8 @@ class ForecastRun(Contract):
     rounds: int
     wmape: float | None
     baseline_wmape: float | None
+    champion: str  # method in service: "baseline" or "model"
+    decision: str | None  # why, from the backtests
 
 
 class ForecastScore(Contract):
@@ -140,7 +142,10 @@ class ForecastView(Contract):
     message: str | None = None
     run: ForecastRun | None = None
     evaluation: list[ForecastScore] = Field(default_factory=list)
-    # daily, zones, hourly, last_actual
+    # The revenue forecast (USD): its own run and champion; actual_trips holds USD there.
+    revenue_run: ForecastRun | None = None
+    revenue_evaluation: list[ForecastScore] = Field(default_factory=list)
+    # backtests, daily, zones, hourly, last_actual; revenue_daily, revenue_last_actual
     tables: dict[str, OverviewTable] = Field(default_factory=dict)
 
 

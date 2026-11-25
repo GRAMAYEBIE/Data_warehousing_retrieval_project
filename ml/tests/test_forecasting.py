@@ -98,21 +98,120 @@ def test_origins_need_four_weeks_of_history(history):
     assert origins(history)[0] == pd.Timestamp("2025-01-01")  # December is history only
 
 
-def test_a_full_run_validates_on_the_last_month_and_forecasts_the_next(history):
-    result = pipeline.run(history)
+@pytest.fixture(scope="module")
+def result(history):
+    return pipeline.run(history)
+
+
+def test_a_run_backtests_three_months_and_forecasts_the_next(result):
+    assert sorted(set(result.backtests.month)) == ["2025-03", "2025-04", "2025-05"]
+    assert set(result.backtests.method) == {"model", "baseline"}
     assert result.validated_month == "2025-05" and result.forecast_month == "2025-06"
-    assert "2025-05" not in result.train_months
+    assert result.champion in {"model", "baseline"}
+    assert set(result.forecast["method"]) == {result.champion}
     assert len(result.forecast) == 5 * 30 * 24
     assert (result.forecast.lower <= result.forecast.predicted).all()
     assert (result.forecast.predicted <= result.forecast.upper).all()
     assert result.forecast.loc[result.forecast.zone_sk == 5, "low_confidence"].all()
     assert set(result.evaluation.segment_type) == {"overall", "borough", "tier", "borough_day"}
     overall = result.evaluation[result.evaluation.segment_type == "overall"].iloc[0]
-    assert 0 < overall.coverage_80 <= 1
-    # Stable synthetic seasonality: the model must at least match the naive baseline.
-    assert overall.wmape <= overall.baseline_wmape * 1.05
+    assert 0.5 < overall.coverage_80 <= 1  # an 80 % interval, built from earlier months only
     daily = result.daily
     assert (daily.lower <= daily.predicted).all() and (daily.predicted <= daily.upper).all()
+
+
+def test_a_backtest_never_reads_after_the_month_it_forecasts(history):
+    """Tampering with everything after the month changes nothing in its backtest."""
+    starts = origins(history)
+    start, prior = starts[2], starts[:2]  # March, trained on January and February
+    before = pipeline.backtest(history, start, prior).frame
+    tampered = History(**{**history.__dict__, "trips": history.trips.copy()})
+    end = int((history.days <= month_days(start)[-1]).sum())
+    tampered.trips[:, end:, :] = 999.0
+    after = pipeline.backtest(tampered, start, prior).frame
+    pd.testing.assert_frame_equal(before, after)
+
+
+def _scores(model: list[float], baseline: list[float], high=(0.1, 0.1)) -> pd.DataFrame:
+    return pd.DataFrame(
+        {"model_wmape": model, "baseline_wmape": baseline,
+         "model_high": [high[0]] * len(model), "baseline_high": [high[1]] * len(model)}
+    )  # fmt: skip
+
+
+def test_the_model_is_promoted_only_when_it_wins_most_months():
+    # The real case of 2026-11: the baseline won March and April, the model May only.
+    assert pipeline.choose(_scores([0.210, 0.217, 0.208], [0.192, 0.194, 0.213]))[0] == "baseline"
+    assert pipeline.choose(_scores([0.18, 0.19, 0.25], [0.20, 0.21, 0.22]))[0] == "model"
+    # Wins most months but loses on average: not promoted.
+    assert pipeline.choose(_scores([0.19, 0.19, 0.40], [0.20, 0.20, 0.21]))[0] == "baseline"
+    # Better overall but worse on the busy zones that carry 92 % of trips: not promoted.
+    worse_high = _scores([0.18, 0.18, 0.18], [0.20, 0.20, 0.20], high=(0.20, 0.15))
+    assert pipeline.choose(worse_high)[0] == "baseline"
+
+
+def test_the_baseline_interval_widens_with_the_level():
+    frame = pd.DataFrame({"baseline": np.repeat([1.0, 50.0], 500)})
+    rng = np.random.default_rng(3)
+    frame["actual"] = rng.poisson(frame["baseline"])
+    bands = pipeline.baseline_bands([frame])
+    lower, upper = pipeline.baseline_interval(np.array([1.0, 50.0]), bands)
+    assert (upper - lower)[1] > (upper - lower)[0] > 0
+    assert lower[1] < 50 < upper[1]
+
+
+def test_revenue_uses_the_same_method_with_tiers_in_trips():
+    """Revenue (USD) = trips x 25 here: same tiers, same champion, values 25 times larger."""
+    from forecasting.data import TARGETS
+
+    trips = synthetic()
+    revenue = History(**{**trips.__dict__, "trips": trips.trips * 25.0, "target": "revenue",
+                         "scale": TARGETS["revenue"].scale})  # fmt: skip
+    origin = pd.Timestamp("2025-04-01")
+    a = build(trips, origin, month_days(origin))
+    b = build(revenue, origin, month_days(origin))
+    assert (a["tier"] == b["tier"]).all()
+    assert np.allclose(b["naive_4w"], a["naive_4w"] * 25)
+    result = pipeline.run(revenue)
+    assert result.target == "revenue" and (result.forecast.predicted >= 0).all()
+    assert (result.forecast.lower <= result.forecast.upper).all()
+
+
+def test_each_target_is_registered_under_its_own_model_name(history, monkeypatch):
+    """Regression: a loop variable once replaced the model name ("coverage_80")."""
+    from forecasting import tracking
+
+    calls = {}
+
+    class Info:
+        registered_model_version = None
+
+    monkeypatch.setattr(tracking.mlflow, "set_tracking_uri", lambda uri: None)
+    monkeypatch.setattr(tracking.mlflow, "set_experiment", lambda n: calls.setdefault("exp", n))
+    monkeypatch.setattr(tracking.mlflow, "set_tags", lambda tags: None)
+    monkeypatch.setattr(tracking.mlflow, "log_params", lambda params: None)
+    monkeypatch.setattr(tracking.mlflow, "log_metrics", lambda metrics: None)
+    monkeypatch.setattr(tracking.mlflow, "log_text", lambda text, path: None)
+
+    def log_model(model, name, registered_model_name):
+        calls["model"] = registered_model_name
+        return Info()
+
+    monkeypatch.setattr(tracking.mlflow.lightgbm, "log_model", log_model)
+
+    class Run:
+        info = type("I", (), {"run_id": "r"})()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr(tracking.mlflow, "start_run", lambda run_name: Run())
+    result = pipeline.run(synthetic(months=6, seed=2))
+    tracking.log(result, "test", ["2025-05"], "http://unused")
+    assert calls == {"exp": "demand_forecast", "model": "demand_forecast"}
 
 
 def test_fewer_than_six_months_is_never_publishable():

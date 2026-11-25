@@ -13,8 +13,28 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
+
+@dataclass(frozen=True)
+class Target:
+    """What is forecast: the sum per zone and hour of a governed column of valid trips."""
+
+    name: str
+    expression: str  # over analytics.mv_trips_hourly
+    unit: str
+    # Rough value of one trip in this unit: the demand tiers and the interval bands are
+    # defined in trips, so a revenue forecast uses the same thresholds (20 trips an hour
+    # is about 500 USD an hour).
+    scale: float
+
+
+TARGETS = {
+    "trips": Target("trips", "sum(trip_count)", "trips", 1.0),
+    # Total amount paid (the governed measure total_revenue), fares, fees and tips included.
+    "revenue": Target("revenue", "sum(sum_total_amount)", "USD", 25.0),
+}
+
 HOURLY_SQL = """
-SELECT date_day, pickup_hour, pickup_zone_sk, sum(trip_count)::bigint AS trips
+SELECT date_day, pickup_hour, pickup_zone_sk, ({expression})::float8 AS trips
 FROM analytics.mv_trips_hourly
 WHERE quality_status = 'valid'
 GROUP BY 1, 2, 3
@@ -26,15 +46,20 @@ STATUS_SQL = "SELECT run_id FROM analytics.pipeline_status"
 
 @dataclass
 class History:
-    """Trips as an array zones x days x 24 hours, with what describes each axis."""
+    """The target as an array zones x days x 24 hours, with what describes each axis.
+
+    The array is called `trips` for the main target; for the revenue forecast it holds USD
+    (see `target` and `scale`)."""
 
     zone_sk: np.ndarray  # (Z,)
     zone_name: np.ndarray  # (Z,)
     borough: np.ndarray  # (Z,)
     days: pd.DatetimeIndex  # (D,) consecutive days of the complete months
-    trips: np.ndarray  # (Z, D, 24) float64
+    trips: np.ndarray  # (Z, D, 24) float64, values of the target
     holidays: frozenset  # dates (Timestamp) that are public holidays, history and future
     data_run: str  # publication the data comes from (analytics.pipeline_status)
+    target: str = "trips"
+    scale: float = 1.0  # Target.scale
 
     @property
     def months(self) -> list[str]:
@@ -42,7 +67,11 @@ class History:
 
 
 def from_frames(
-    hourly: pd.DataFrame, zones: pd.DataFrame, holidays: set, data_run: str = "test"
+    hourly: pd.DataFrame,
+    zones: pd.DataFrame,
+    holidays: set,
+    data_run: str = "test",
+    target: Target = TARGETS["trips"],
 ) -> History:
     """Dense array from the sparse rows (date_day, pickup_hour, pickup_zone_sk, trips)."""
     hourly = hourly.copy()
@@ -53,8 +82,11 @@ def from_frames(
     trips = np.zeros((len(zone_sk), len(days), 24))
     z = np.searchsorted(zone_sk, hourly["pickup_zone_sk"].to_numpy())
     d = (hourly["date_day"] - days[0]).dt.days.to_numpy()
-    trips[z, d, hourly["pickup_hour"].to_numpy().astype(int)] = hourly["trips"].to_numpy()
+    values = np.clip(hourly["trips"].to_numpy(dtype=float), 0, None)  # refunds: never below 0
+    trips[z, d, hourly["pickup_hour"].to_numpy().astype(int)] = values
     return History(
+        target=target.name,
+        scale=target.scale,
         zone_sk=zone_sk,
         zone_name=names["zone_name"].fillna("Unknown").to_numpy(),
         borough=names["borough"].fillna("Unknown").to_numpy(),
@@ -65,8 +97,9 @@ def from_frames(
     )
 
 
-def load(conn) -> History:
+def load(conn, target: str = "trips") -> History:
     """Read the published layer with the forecaster role (read-only on analytics)."""
+    spec = TARGETS[target]
 
     def frame(sql: str) -> pd.DataFrame:
         with conn.cursor() as cur:
@@ -77,8 +110,9 @@ def load(conn) -> History:
     calendar = frame(CALENDAR_SQL)
     status = frame(STATUS_SQL)
     return from_frames(
-        frame(HOURLY_SQL),
+        frame(HOURLY_SQL.format(expression=spec.expression)),
         frame(ZONES_SQL),
         set(calendar.loc[calendar["is_holiday"], "date_day"]),
         str(status["run_id"].iloc[0]) if len(status) else "unknown",
+        spec,
     )

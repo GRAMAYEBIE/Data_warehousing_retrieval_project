@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { ArrowUpRight, CircleAlert, FlaskConical, Gauge, RefreshCw, Target, TrendingUp } from "lucide-react";
+import { ArrowUpRight, CircleAlert, CircleDollarSign, FlaskConical, Gauge, RefreshCw, Target, TrendingUp, Trophy } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import {
   Area,
@@ -24,7 +24,6 @@ import { CountUp, rise, spring, stagger } from "./motion";
 import { BarList, INK, Tip } from "./ResultChart";
 
 type Table = Forecast["tables"][string];
-type Score = Forecast["evaluation"][number];
 
 const rowsOf = (t?: Table) => (t ? t.rows.map((r) => Object.fromEntries(t.columns.map((c, i) => [c, r[i]]))) : []);
 const pct = (v?: number | null, digits = 1) => (v === null || v === undefined ? "-" : `${(v * 100).toFixed(digits)} %`);
@@ -76,8 +75,16 @@ export default function ForecastView() {
   const perDayChange = actualTotal ? (total / days / (actualTotal / actualDays) - 1) * 100 : null;
   const cityDay = score("borough_day", "all");
   const overall = score("overall", "all");
-  const gain = cityDay?.wmape && cityDay.baseline_wmape ? (1 - cityDay.wmape / cityDay.baseline_wmape) * 100 : null;
+  const backtests = rowsOf(data.tables.backtests) as Backtest[];
+  const champion = run.champion === "model" ? "model" : "baseline";
+  const championDays = backtests.filter((b) => b.method === champion && b.segment_type === "borough_day" && b.segment === "all");
+  const meanDay = championDays.length ? championDays.reduce((s, b) => s + Number(b.wmape), 0) / championDays.length : null;
   const zones = rowsOf(data.tables.zones);
+  const revenueDaily = rowsOf(data.tables.revenue_daily);
+  const revenueActual = rowsOf(data.tables.revenue_last_actual);
+  const revenueTotal = revenueDaily.reduce((s, r) => s + Number(r.predicted), 0);
+  const revenuePast = revenueActual.reduce((s, r) => s + Number(r.revenue), 0);
+  const revenueChange = revenuePast ? (revenueTotal / days / (revenuePast / actualDays) - 1) * 100 : null;
 
   return (
     <Shell>
@@ -99,6 +106,9 @@ export default function ForecastView() {
         </a>
       </header>
 
+      <Decision champion={champion} decision={run.decision} />
+
+
       <motion.section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4" variants={stagger} initial="hidden" animate="show" aria-label="Key figures">
         <Tile icon={<TrendingUp size={16} />} label={`Expected trips, ${month}`}>
           <CountUp value={total} format={millions} />
@@ -110,32 +120,51 @@ export default function ForecastView() {
             )}
           </Note>
         </Tile>
-        <Tile icon={<Target size={16} />} label="Error per borough and day">
+        <Tile icon={<Target size={16} />} label={`Error per borough and day, ${validated}`}>
           <CountUp value={(cityDay?.wmape ?? 0) * 100} format={(n) => `${n.toFixed(1)} %`} />
           <Note>
-            baseline {pct(cityDay?.baseline_wmape)}
-            {gain !== null && <span className="font-medium text-good-ink"> · {gain.toFixed(0)} % better</span>}
+            {meanDay !== null && (
+              <>
+                <span className="num">{pct(meanDay)}</span> on average over the {championDays.length} test months
+              </>
+            )}
           </Note>
         </Tile>
         <Tile icon={<Gauge size={16} />} label="80 % range held the actual">
           <CountUp value={(overall?.coverage_80 ?? 0) * 100} format={(n) => `${n.toFixed(1)} %`} />
           <Note>of the zone-hours of {validated} (aim: 80 %)</Note>
         </Tile>
-        <Tile icon={<TrendingUp size={16} />} label="Busiest zone expected">
-          <span className="block text-[24px] leading-tight">{String(zones[0]?.zone_name ?? "-")}</span>
+        <Tile icon={<CircleDollarSign size={16} />} label={`Expected revenue, ${month}`}>
+          {revenueDaily.length ? <CountUp value={revenueTotal} format={(n) => `$${(n / 1_000_000).toFixed(1)}M`} /> : "-"}
           <Note>
-            <span className="num">{millions(Number(zones[0]?.predicted ?? 0))}</span> trips, {String(zones[0]?.borough ?? "")}
+            {revenueChange !== null && (
+              <>
+                <span className="num">{revenueChange >= 0 ? "+" : ""}{revenueChange.toFixed(1)} %</span> a day vs {validated} · total paid
+              </>
+            )}
           </Note>
         </Tile>
       </motion.section>
 
-      <Panel title="Trips per day" subtitle={`${month}, with the 80 % range · dashed: the daily average of ${validated}`}>
-        <Daily rows={daily} actual={actual} ink={ink} />
+      <Panel title="Day by day" subtitle={`${month}, with the 80 % range · dashed: the daily average of ${validated}`}>
+        <Daily
+          series={{
+            trips: { rows: daily, actual: actual.map((a) => ({ borough: a.borough, total: a.trips, days: a.days })) },
+            ...(revenueDaily.length
+              ? { revenue: { rows: revenueDaily, actual: revenueActual.map((a) => ({ borough: a.borough, total: a.revenue, days: a.days })) } }
+              : {}),
+          }}
+          ink={ink}
+        />
       </Panel>
 
       <div className="grid gap-4 lg:grid-cols-5">
-        <Panel className="lg:col-span-3" title={`Accuracy on ${validated}`} subtitle="Error = share of trips missed or over-counted (WMAPE). Lower is better.">
-          <Accuracy scores={data.evaluation} days={actualDays} />
+        <Panel
+          className="lg:col-span-3"
+          title="Baseline against the model, month by month"
+          subtitle="Each month forecast from the weeks before it. Error = share of trips missed or over-counted (WMAPE); lower is better."
+        >
+          <Accuracy backtests={backtests} champion={champion} days={actualDays} />
         </Panel>
         <Panel className="lg:col-span-2" title="Busiest pickup zones" subtitle={`Expected trips, ${month}`}>
           <BarList unit="trips" colors={ink} rows={zones.map((z) => ({ key: String(z.zone_name), value: Math.round(Number(z.predicted)) }))} />
@@ -196,9 +225,15 @@ function Panel({ title, subtitle, className = "", children }: { title: string; s
 
 type Ink = (typeof INK)["light"];
 
-function Daily({ rows, actual, ink }: { rows: Record<string, unknown>[]; actual: Record<string, unknown>[]; ink: Ink }) {
+type Series = { rows: Record<string, unknown>[]; actual: { borough: unknown; total: unknown; days: unknown }[] };
+
+// One measure at a time (one axis): trips or revenue, per borough.
+function Daily({ series, ink }: { series: { trips: Series; revenue?: Series }; ink: Ink }) {
   const [borough, setBorough] = useState("Manhattan");
-  const points = rows
+  const [measure, setMeasure] = useState<"trips" | "revenue">("trips");
+  const shown = (measure === "revenue" && series.revenue) || series.trips;
+  const usd = measure === "revenue" && Boolean(series.revenue);
+  const points = shown.rows
     .filter((r) => r.borough === borough)
     .map((r) => {
       const day = new Date(`${r.date_day}T00:00:00`);
@@ -209,31 +244,22 @@ function Daily({ rows, actual, ink }: { rows: Record<string, unknown>[]; actual:
         range: [Number(r.lower), Number(r.upper)] as [number, number],
       };
     });
-  const past = actual.find((a) => a.borough === borough);
-  const pastAverage = past ? Number(past.trips) / Number(past.days) : undefined;
+  const past = shown.actual.find((a) => a.borough === borough);
+  const pastAverage = past ? Number(past.total) / Number(past.days) : undefined;
+  const measures: [typeof measure, string][] = series.revenue ? [["trips", "Trips"], ["revenue", "Revenue"]] : [["trips", "Trips"]];
   return (
     <div className="flex h-full flex-col">
-      <div className="mb-3 inline-flex self-start rounded-input bg-tint p-1" role="tablist" aria-label="Borough">
-        {BOROUGHS.map((b) => (
-          <button
-            key={b}
-            role="tab"
-            aria-selected={borough === b}
-            onClick={() => setBorough(b)}
-            className={`relative rounded-[8px] px-3 py-1 text-xs font-medium transition-colors ${borough === b ? "text-ink" : "text-ink-2 hover:text-ink"}`}
-          >
-            {borough === b && <motion.span layoutId="forecast-borough" className="absolute inset-0 rounded-[8px] bg-surface shadow-soft" transition={spring} />}
-            <span className="relative">{b}</span>
-          </button>
-        ))}
+      <div className="mb-3 flex flex-wrap gap-2">
+        <Tabs label="Measure" id="forecast-measure" items={measures} value={measure} onChange={setMeasure} />
+        <Tabs label="Borough" id="forecast-borough" items={BOROUGHS.map((b) => [b, b] as [string, string])} value={borough} onChange={setBorough} />
       </div>
       <div className="h-[280px] w-full">
         <ResponsiveContainer>
-          <ComposedChart key={borough} data={points} margin={{ top: 10, right: 14, left: 0, bottom: 0 }}>
+          <ComposedChart key={`${measure}-${borough}`} data={points} margin={{ top: 10, right: 14, left: 0, bottom: 0 }}>
             <CartesianGrid stroke={ink.grid} vertical={false} />
             <XAxis dataKey="day" tick={{ fontSize: 12, fill: ink.axis }} axisLine={false} tickLine={false} interval="preserveStartEnd" minTickGap={24} />
-            <YAxis tickFormatter={(v: number) => compact(v)} tick={{ fontSize: 12, fill: ink.axis }} width={52} axisLine={false} tickLine={false} />
-            <Tooltip content={<DayTip />} cursor={{ stroke: ink.axis, strokeDasharray: "3 3" }} />
+            <YAxis tickFormatter={(v: number) => (usd ? `$${compact(v)}` : compact(v))} tick={{ fontSize: 12, fill: ink.axis }} width={56} axisLine={false} tickLine={false} />
+            <Tooltip content={<DayTip usd={usd} />} cursor={{ stroke: ink.axis, strokeDasharray: "3 3" }} />
             <Area dataKey="range" stroke="none" fill={ink.series[0]} fillOpacity={0.14} isAnimationActive animationDuration={700} />
             {pastAverage !== undefined && (
               <ReferenceLine y={pastAverage} stroke={ink.axis} strokeDasharray="4 4" ifOverflow="extendDomain" />
@@ -246,77 +272,155 @@ function Daily({ rows, actual, ink }: { rows: Record<string, unknown>[]; actual:
   );
 }
 
-function DayTip({ active, payload }: TooltipProps<number, string>) {
+function Tabs<T extends string>({
+  label,
+  id,
+  items,
+  value,
+  onChange,
+}: {
+  label: string;
+  id: string;
+  items: [T, string][];
+  value: T;
+  onChange: (v: T) => void;
+}) {
+  return (
+    <div className="inline-flex rounded-input bg-tint p-1" role="tablist" aria-label={label}>
+      {items.map(([key, text]) => (
+        <button
+          key={key}
+          role="tab"
+          aria-selected={value === key}
+          onClick={() => onChange(key)}
+          className={`relative rounded-[8px] px-3 py-1 text-xs font-medium transition-colors ${value === key ? "text-ink" : "text-ink-2 hover:text-ink"}`}
+        >
+          {value === key && <motion.span layoutId={id} className="absolute inset-0 rounded-[8px] bg-surface shadow-soft" transition={spring} />}
+          <span className="relative">{text}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function DayTip({ active, payload, usd }: TooltipProps<number, string> & { usd: boolean }) {
   if (!active || !payload?.length) return null;
   const p = payload[0].payload as { day: string; weekday: string; predicted: number; range: [number, number] };
+  const fmt = (n: number) => (usd ? `$${Math.round(n).toLocaleString("en-US")}` : formatValue(Math.round(n), "trips"));
   return (
     <div className="rounded-lg border border-line bg-surface px-3 py-2 text-xs shadow-raised">
       <div className="mb-1 font-medium text-ink">
         {p.weekday} {p.day}
       </div>
-      <div className="num text-ink">{formatValue(Math.round(p.predicted), "trips")} trips expected</div>
+      <div className="num text-ink">
+        {fmt(p.predicted)} {usd ? "expected" : "trips expected"}
+      </div>
       <div className="num text-ink-3">
-        80 % range {formatValue(Math.round(p.range[0]), "trips")} to {formatValue(Math.round(p.range[1]), "trips")}
+        80 % range {fmt(p.range[0])} to {fmt(p.range[1])}
       </div>
     </div>
   );
 }
 
-function Accuracy({ scores, days }: { scores: Score[]; days: number }) {
-  const boroughs = scores.filter((s) => s.segment_type === "borough_day" && s.segment !== "all");
-  const tiers = ["high", "medium", "low", "sparse"]
-    .map((t) => scores.find((s) => s.segment_type === "tier" && s.segment === t))
-    .filter((s): s is Score => Boolean(s));
-  const max = Math.max(0.01, ...boroughs.flatMap((s) => [s.wmape ?? 0, s.baseline_wmape ?? 0]));
+type Backtest = { month: string; method: string; segment_type: string; segment: string; rows: number; wmape: number; bias: number };
+
+const METHOD_NAME: Record<string, string> = { baseline: "Baseline", model: "Model" };
+
+// The champion is the method in service; the bars and the table say which one won where.
+function Accuracy({ backtests, champion, days }: { backtests: Backtest[]; champion: string; days: number }) {
+  const get = (month: string, method: string, type: string, segment: string) =>
+    backtests.find((b) => b.month === month && b.method === method && b.segment_type === type && b.segment === segment);
+  const months = [...new Set(backtests.map((b) => b.month))].sort();
+  const last = months[months.length - 1] ?? "";
+  const challenger = champion === "model" ? "baseline" : "model";
+  const boroughs = [...new Set(backtests.filter((b) => b.segment_type === "borough_day" && b.segment !== "all").map((b) => b.segment))]
+    .map((name) => ({ name, champ: get(last, champion, "borough_day", name), chall: get(last, challenger, "borough_day", name) }))
+    .sort((a, b) => Number(a.champ?.wmape ?? 9) - Number(b.champ?.wmape ?? 9));
+  const max = Math.max(0.01, ...boroughs.flatMap((b) => [Number(b.champ?.wmape ?? 0), Number(b.chall?.wmape ?? 0)]));
+  const cell = "num whitespace-nowrap py-1.5 pl-3 text-right";
   return (
-    <div className="space-y-5">
-      <div>
-        <div className="mb-2 flex items-center gap-4 text-xs text-ink-3">
-          <Legend className="bg-primary" text="Model" />
-          <Legend className="bg-line-strong" text="Seasonal baseline (same weekday and hour, last 4 weeks)" />
-        </div>
-        <ul className="space-y-2.5">
-          {boroughs.map((s) => {
-            const better = (s.wmape ?? 1) < (s.baseline_wmape ?? 0);
+    <div className="space-y-6">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="text-left text-xs text-ink-3">
+            <th className="pb-1.5 font-medium">Month tested</th>
+            <th className="pb-1.5 pl-3 text-right font-medium">Baseline</th>
+            <th className="pb-1.5 pl-3 text-right font-medium">Model</th>
+            <th className="pb-1.5 pl-3 text-right font-medium">Winner</th>
+          </tr>
+        </thead>
+        <tbody>
+          {months.map((m) => {
+            const base = Number(get(m, "baseline", "overall", "all")?.wmape);
+            const model = Number(get(m, "model", "overall", "all")?.wmape);
+            const winner = model < base ? "model" : "baseline";
             return (
-              <li key={s.segment}>
-                <div className="flex items-baseline gap-3 text-sm">
-                  <span className="min-w-0 flex-1 truncate text-ink-2">{s.segment}</span>
-                  <span className={`num text-xs ${better ? "text-good-ink" : "text-bad-ink"}`}>{better ? "better" : "worse"}</span>
-                  <span className="num w-16 text-right font-medium text-ink">{pct(s.wmape)}</span>
-                  <span className="num w-16 text-right text-ink-3">{pct(s.baseline_wmape)}</span>
-                </div>
-                <div className="mt-1 space-y-1">
-                  <Track width={(100 * (s.wmape ?? 0)) / max} className="bg-primary" />
-                  <Track width={(100 * (s.baseline_wmape ?? 0)) / max} className="bg-line-strong" thin />
-                </div>
-              </li>
+              <tr key={m} className="border-t border-line">
+                <td className="py-1.5 text-ink-2">{monthLabel(m)}</td>
+                <td className={`${cell} ${winner === "baseline" ? "font-semibold text-ink" : "text-ink-3"}`}>{pct(base)}</td>
+                <td className={`${cell} ${winner === "model" ? "font-semibold text-ink" : "text-ink-3"}`}>{pct(model)}</td>
+                <td className="py-1.5 pl-3 text-right">
+                  <span className={`chip ${winner === champion ? "border-primary/30 bg-primary/10 text-primary-strong" : "border-line bg-tint text-ink-2"}`}>
+                    {METHOD_NAME[winner]}
+                  </span>
+                </td>
+              </tr>
             );
           })}
+        </tbody>
+      </table>
+      <p className="-mt-3 text-xs leading-5 text-ink-3">Error per zone and hour. The model is promoted when it wins most months, on average, and on the busy zones.</p>
+
+      <div>
+        <h3 className="mb-2 text-sm font-semibold">Per borough and day, {monthLabel(last)}</h3>
+        <div className="mb-2 flex flex-wrap items-center gap-4 text-xs text-ink-3">
+          <Legend className="bg-primary" text={`${METHOD_NAME[champion]} (in service)`} />
+          <Legend className="bg-line-strong" text={`${METHOD_NAME[challenger]}`} />
+        </div>
+        <ul className="space-y-2.5">
+          {boroughs.map(({ name, champ, chall }) => (
+            <li key={name}>
+              <div className="flex items-baseline gap-3 text-sm">
+                <span className="min-w-0 flex-1 truncate text-ink-2">{name}</span>
+                <span className="num w-16 text-right font-medium text-ink">{pct(champ?.wmape)}</span>
+                <span className="num w-16 text-right text-ink-3">{pct(chall?.wmape)}</span>
+              </div>
+              <div className="mt-1 space-y-1">
+                <Track width={(100 * Number(champ?.wmape ?? 0)) / max} className="bg-primary" />
+                <Track width={(100 * Number(chall?.wmape ?? 0)) / max} className="bg-line-strong" thin />
+              </div>
+            </li>
+          ))}
         </ul>
       </div>
+
       <div>
-        <h3 className="mb-2 text-sm font-semibold">By demand level of the zone (per zone and hour)</h3>
+        <h3 className="mb-2 text-sm font-semibold">By demand level of the zone, per zone and hour, {monthLabel(last)}</h3>
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-xs text-ink-3">
               <th className="pb-1.5 font-medium">Zones</th>
-              <th className="pb-1.5 text-right font-medium">Model</th>
-              <th className="pb-1.5 text-right font-medium">Baseline</th>
+              <th className="pb-1.5 pl-3 text-right font-medium">Baseline</th>
+              <th className="pb-1.5 pl-3 text-right font-medium">Model</th>
             </tr>
           </thead>
           <tbody>
-            {tiers.map((s) => (
-              <tr key={s.segment} className="border-t border-line">
-                <td className="py-1.5 text-ink-2">
-                  {TIER_TEXT[s.segment] ?? s.segment}
-                  <span className="num text-ink-3"> · {Math.round(s.rows / (days * 24))} zones</span>
-                  {s.segment === "sparse" && <span className="chip ml-2 border-accent/40 bg-accent/15 text-ink">low confidence</span>}
-                </td>
-                <td className="num whitespace-nowrap py-1.5 pl-2 text-right font-medium">{pct(s.wmape, 0)}</td>
-                <td className="num whitespace-nowrap py-1.5 pl-2 text-right text-ink-3">{pct(s.baseline_wmape, 0)}</td>
-              </tr>
-            ))}
+            {["high", "medium", "low", "sparse"].map((tier) => {
+              const base = get(last, "baseline", "tier", tier);
+              const model = get(last, "model", "tier", tier);
+              if (!base) return null;
+              return (
+                <tr key={tier} className="border-t border-line">
+                  <td className="py-1.5 text-ink-2">
+                    {TIER_TEXT[tier]}
+                    <span className="num text-ink-3"> · {Math.round(Number(base.rows) / (days * 24))} zones</span>
+                    {tier === "sparse" && <span className="chip ml-2 border-accent/40 bg-accent/15 text-ink">low confidence</span>}
+                  </td>
+                  <td className={`${cell} ${champion === "baseline" ? "font-medium" : "text-ink-3"}`}>{pct(base.wmape, 0)}</td>
+                  <td className={`${cell} ${champion === "model" ? "font-medium" : "text-ink-3"}`}>{pct(model?.wmape, 0)}</td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
         <p className="mt-2 text-xs leading-5 text-ink-3">
@@ -325,6 +429,27 @@ function Accuracy({ scores, days }: { scores: Score[]; days: number }) {
         </p>
       </div>
     </div>
+  );
+}
+
+function Decision({ champion, decision }: { champion: string; decision?: string | null }) {
+  return (
+    <section className="card flex flex-wrap items-start gap-4 px-5 py-4" aria-label="Method in service">
+      <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-primary/10 text-primary-strong">
+        <Trophy size={19} aria-hidden="true" />
+      </span>
+      <div className="min-w-[220px] flex-1">
+        <div className="text-sm font-semibold">
+          Method in service: {champion === "model" ? "the LightGBM model" : "the seasonal baseline"}
+        </div>
+        <p className="mt-0.5 text-xs leading-5 text-ink-3">
+          {champion === "model"
+            ? "The model beat the baseline in most of the last test months; the baseline is kept as the reference to beat."
+            : "Same weekday and hour, averaged over the last four weeks. The LightGBM model is trained and tested every month as the challenger and takes over when it wins."}
+          {decision && <span className="block text-ink-2">{decision.replace(/^(model promoted|baseline kept in service): /, "Last decision: ")}.</span>}
+        </p>
+      </div>
+    </section>
   );
 }
 
@@ -376,8 +501,8 @@ function Hourly({ table, ink }: { table?: Table; ink: Ink }) {
 
 function Method({ validated, runId, rounds }: { validated: string; runId: string; rounds: number }) {
   const items: [string, string][] = [
-    ["Tested on unseen data", `The model learns from earlier months only and is scored on ${validated}, a month it never saw. Never a random split.`],
-    ["A baseline to beat", "Each forecast is compared with the same weekday and hour over the last four weeks. A model that does not beat it is not published."],
+    ["Tested on unseen months", `Each of the last three months, up to ${validated}, is forecast from the weeks before it, the model trained on earlier months only. Never a random split.`],
+    ["Champion and challenger", "The seasonal baseline and the LightGBM model compete every month. The model is used only when it wins most of those months; otherwise it keeps training as the challenger."],
     ["Imbalance taken into account", "Errors are measured per borough and per demand level, weighted by trips, so the busy Manhattan zones cannot hide the rest."],
     ["What it predicts", "Recorded trips, not total need: a ride that could not find a taxi leaves no trace in the data."],
   ];

@@ -91,7 +91,7 @@ def build(history: History, origin: pd.Timestamp, target_days: pd.DatetimeIndex)
     recent = past[:, o - 14 :, :].mean(axis=(1, 2))
     before = past[:, o - 28 : o - 14, :].mean(axis=(1, 2))
     trend_2w = (recent + 0.5) / (before + 0.5)
-    tier = tier_of(w8.mean(axis=(1, 2)))
+    tier = tier_of(w8.mean(axis=(1, 2)) / history.scale)  # tiers are in trips an hour
 
     n_zones, n_days = len(history.zone_sk), len(target_days)
     z = np.repeat(np.arange(n_zones), n_days * 24)

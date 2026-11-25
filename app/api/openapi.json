@@ -371,6 +371,10 @@
       ],
       "title": "Baseline Wmape"
      },
+     "champion": {
+      "title": "Champion",
+      "type": "string"
+     },
      "created_at": {
       "title": "Created At",
       "type": "string"
@@ -378,6 +382,17 @@
      "data_run": {
       "title": "Data Run",
       "type": "string"
+     },
+     "decision": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Decision"
      },
      "forecast_month": {
       "title": "Forecast Month",
@@ -428,7 +443,9 @@
      "model",
      "rounds",
      "wmape",
-     "baseline_wmape"
+     "baseline_wmape",
+     "champion",
+     "decision"
     ],
     "title": "ForecastRun",
     "type": "object"
@@ -558,6 +575,23 @@
       ],
       "title": "Message"
      },
+     "revenue_evaluation": {
+      "items": {
+       "$ref": "#/components/schemas/ForecastScore"
+      },
+      "title": "Revenue Evaluation",
+      "type": "array"
+     },
+     "revenue_run": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/ForecastRun"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
      "run": {
       "anyOf": [
        {
@@ -581,6 +615,8 @@
      "message",
      "run",
      "evaluation",
+     "revenue_run",
+     "revenue_evaluation",
      "tables"
     ],
     "title": "ForecastView",
