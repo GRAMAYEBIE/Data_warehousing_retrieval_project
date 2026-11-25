@@ -22,10 +22,19 @@ import { compact, formatValue, monthLabel } from "../lib/format";
 import { useIsDark } from "../lib/theme";
 import { CountUp, rise, stagger } from "./motion";
 import ForecastCheck from "./ForecastCheck";
+import ForecastLive from "./ForecastLive";
 import { BarList, INK, Tip } from "./ResultChart";
 import Tabs from "./Tabs";
 
 type Table = Forecast["tables"][string];
+
+// The stream has trips of the forecast month and the official month is not published yet.
+const isLive = (data?: Forecast) => {
+  const t = data?.tables.live_status;
+  if (!t?.rows.length) return false;
+  const row = Object.fromEntries(t.columns.map((c, i) => [c, t.rows[0][i]]));
+  return Number(row.received) > 0 && !row.published;
+};
 
 const rowsOf = (t?: Table) => (t ? t.rows.map((r) => Object.fromEntries(t.columns.map((c, i) => [c, r[i]]))) : []);
 const pct = (v?: number | null, digits = 1) => (v === null || v === undefined ? "-" : `${(v * 100).toFixed(digits)} %`);
@@ -43,7 +52,13 @@ const TIER_TEXT: Record<string, string> = {
 export default function ForecastView() {
   const config = useConfig();
   const ink = useIsDark() ? INK.dark : INK.light;
-  const query = useQuery({ queryKey: ["forecast"], queryFn: api.forecast, staleTime: 5 * 60_000 });
+  const query = useQuery({
+    queryKey: ["forecast"],
+    queryFn: api.forecast,
+    staleTime: 5 * 60_000,
+    // While the forecast month streams in, the page follows it every 10 seconds.
+    refetchInterval: (q) => (isLive(q.state.data) ? 10_000 : false),
+  });
   const data = query.data;
 
   if (query.isError || (data && !data.available)) {
@@ -109,6 +124,12 @@ export default function ForecastView() {
       </header>
 
       <Decision champion={champion} decision={run.decision} />
+
+      {isLive(data) && (
+        <Panel title={`${month}, as it streams in`} subtitle="Provisional trips received through Kafka against the forecast, before the official file">
+          <ForecastLive tables={data.tables} ink={ink} />
+        </Panel>
+      )}
 
 
       <motion.section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4" variants={stagger} initial="hidden" animate="show" aria-label="Key figures">

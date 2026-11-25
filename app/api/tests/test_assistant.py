@@ -629,6 +629,13 @@ def test_the_forecast_page_reads_the_published_run_only():
 
         def query(self, sql, params):
             self.sql.append(sql)
+            if "stream.yellow_trips" in sql:
+                if not self.checked:  # profile stream never started: no live section
+                    raise psycopg.errors.InvalidSchemaName("schema stream does not exist")
+                if "live_status" in sql or "received" in sql:
+                    return ["received", "plausible", "clock"], [(1200, 1100, "2025-06-02")], 1
+                assert params == {"run": "r1", "start": "2025-06-01"}
+                return ["borough", "date_day", "predicted", "live"], [("Queens", "x", 1, 1)], 1
             if "ml.forecast_check_run" in sql:
                 if not self.checked:  # no month checked yet: the page has no check section
                     raise psycopg.errors.UndefinedTable("relation ml.forecast_check_run")
@@ -656,6 +663,8 @@ def test_the_forecast_page_reads_the_published_run_only():
     # Once a month is checked, the forecast against actual comes with the page.
     checked = forecast.compute(ForecastStore(checked=True))["tables"]
     assert {"checks", "check_scores", "check_daily"} <= set(checked)
+    # While the forecast month streams in, the live view comes with it.
+    assert {"live_status", "live_daily"} <= set(checked)
 
     class NoSchema:
         def query(self, sql, params):

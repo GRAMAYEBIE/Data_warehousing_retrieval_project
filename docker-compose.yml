@@ -1,7 +1,7 @@
 name: nyc-taxi-insight-hub
 
 # Profiles: core (warehouse + landing zone), orchestration (Airflow), tools (one-shot jobs).
-# Later waves add: bi, ai, observability, ml (MLflow + demand forecast), stream.
+# Later waves add: bi, ai, observability, ml (MLflow + demand forecast), stream (Kafka).
 
 x-superset-env: &superset-env
   SUPERSET_SECRET_KEY: ${SUPERSET_SECRET_KEY}
@@ -110,6 +110,7 @@ services:
       SUPERSET_DB_PASSWORD: ${SUPERSET_DB_PASSWORD}
       FORECASTER_PASSWORD: ${FORECASTER_PASSWORD}
       MLFLOW_DB_PASSWORD: ${MLFLOW_DB_PASSWORD}
+      STREAMER_PASSWORD: ${STREAMER_PASSWORD}
     command:
       - postgres
       - -c
@@ -530,6 +531,89 @@ services:
         condition: service_healthy
     restart: "no"
 
+  # ------------------------------------------------------------------ stream (wave 8)
+  # Provisional trips of the current month through Kafka: one KRaft broker (no ZooKeeper),
+  # a consumer writing stream.yellow_trips, a producer replaying a monthly file on demand
+  # (docker compose run --rm --no-deps stream-producer produce --month 2025-06), and a web
+  # view of the topics. Provisional rows never enter silver, gold or a governed measure.
+  kafka:
+    image: apache/kafka:3.9.1
+    profiles: [stream]
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"  # topics are created by the stream service
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      KAFKA_HEAP_OPTS: -Xms512m -Xmx512m
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 20s
+    mem_limit: 1g
+    restart: unless-stopped
+
+  stream-consumer:
+    image: nyc-taxi-stream:local
+    build: ./services/stream
+    profiles: [stream]
+    command: ["consume"]
+    environment:
+      KAFKA_BOOTSTRAP: kafka:9092
+      PGHOST: postgres
+      PGDATABASE: ${POSTGRES_DB}
+      PGUSER: streamer
+      STREAMER_PASSWORD: ${STREAMER_PASSWORD}
+    depends_on:
+      kafka:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    mem_limit: 512m
+    restart: unless-stopped
+
+  stream-producer:
+    image: nyc-taxi-stream:local
+    build: ./services/stream
+    profiles: [stream]
+    command: ["produce", "--month", "${STREAM_MONTH:-2025-06}"]
+    environment:
+      KAFKA_BOOTSTRAP: kafka:9092
+    volumes:
+      - stream_cache:/cache
+    depends_on:
+      kafka:
+        condition: service_healthy
+    mem_limit: 2g
+    restart: "no"
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:v0.7.2
+    profiles: [stream]
+    ports:
+      - "127.0.0.1:${KAFKA_UI_PORT:-8085}:8080"  # no login of its own: local only
+    environment:
+      KAFKA_CLUSTERS_0_NAME: metromove
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+      DYNAMIC_CONFIG_ENABLED: "false"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    mem_limit: 512m
+    restart: unless-stopped
+
   # ------------------------------------------------------------------ observability
   # Metrics (Prometheus, exporters, Alertmanager), logs (Loki, Alloy), traces (Tempo) and
   # one place to see them (Grafana, dashboards and data sources as code). Memory limits
@@ -702,6 +786,8 @@ services:
     restart: unless-stopped
 
 volumes:
+  kafka_data:
+  stream_cache:
   ollama_models:
   speech_models:
   airflow_logs:

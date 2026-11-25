@@ -1,0 +1,7 @@
+# Pinned dependencies of the streaming service (wave 8).
+confluent-kafka==2.6.1
+httpx==0.28.1
+psycopg[binary]==3.3.9
+pyarrow==21.0.0
+pytest==9.2.0
+ruff==0.17.5

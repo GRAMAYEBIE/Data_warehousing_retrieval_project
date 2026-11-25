@@ -119,6 +119,47 @@ CHECK_TABLES = {
 }
 
 
+# The forecast month as it streams in (wave 8): provisional trips received through Kafka,
+# counted with the plausibility rules of silver (the forecast predicts valid trips),
+# against the forecast of the same days. Hidden once the official month is published.
+PLAUSIBLE = """
+    s.trip_distance > 0 AND s.trip_distance <= 200 AND s.total_amount >= 0
+    AND s.dropoff_ts > s.pickup_ts
+    AND s.dropoff_ts - s.pickup_ts BETWEEN interval '1 minute' AND interval '360 minutes'
+    AND s.trip_distance / (extract(epoch FROM s.dropoff_ts - s.pickup_ts) / 3600) <= 80
+    AND s.pu_location_id NOT IN (264, 265) AND s.do_location_id NOT IN (264, 265)
+    AND s.pickup_ts >= %(start)s::date AND s.pickup_ts < %(start)s::date + interval '1 month'"""
+LIVE_TABLES = {
+    "live_status": f"""
+        SELECT count(*) AS received, count(*) FILTER (WHERE {PLAUSIBLE}) AS plausible,
+               max(s.pickup_ts)::text AS clock, max(s.received_at)::text AS last_received,
+               (SELECT count(*) FROM stream.yellow_trips_rejects AS r
+                WHERE r.received_at > now() - interval '7 days') AS rejected,
+               EXISTS (SELECT 1 FROM analytics.mv_trips_daily AS m
+                       WHERE m.month_start = %(start)s::date) AS published
+        FROM stream.yellow_trips AS s
+        WHERE s.source_month = %(start)s::date
+        LIMIT 1""",
+    "live_daily": f"""
+        WITH live AS (
+            SELECT s.pickup_ts::date AS date_day, coalesce(z.borough, 'Unknown') AS borough,
+                   count(*) AS trips
+            FROM stream.yellow_trips AS s
+            LEFT JOIN analytics.dim_zone AS z ON z.location_id = s.pu_location_id
+            WHERE s.source_month = %(start)s::date AND {PLAUSIBLE}
+            GROUP BY 1, 2
+        )
+        SELECT f.borough, f.date_day::text AS date_day, f.predicted_trips::float AS predicted,
+               f.lower_80::float AS lower, f.upper_80::float AS upper,
+               coalesce(l.trips, 0)::float AS live
+        FROM ml.demand_forecast_daily AS f
+        LEFT JOIN live AS l ON l.date_day = f.date_day AND l.borough = f.borough
+        WHERE f.run_id = %(run)s
+        ORDER BY f.borough, f.date_day
+        LIMIT 400""",
+}
+
+
 def compute(store) -> dict:
     """The page's data; {"available": False, ...} when no forecast was published yet."""
     try:
@@ -152,6 +193,16 @@ def compute(store) -> dict:
         revenue_evaluation = [dict(zip(e_columns, r, strict=True)) for r in e_rows]
         for name, sql in REVENUE_TABLES.items():
             add(name, sql, r_params)
+
+    # The forecast month as it streams in, when the stream has data for it.
+    try:
+        live = {"run": run["run_id"], "start": f"{run['forecast_month']}-01"}
+        add("live_status", LIVE_TABLES["live_status"], live)
+        status = tables["live_status"]["rows"]
+        if status and status[0][0]:
+            add("live_daily", LIVE_TABLES["live_daily"], live)
+    except (psycopg.errors.UndefinedTable, psycopg.errors.InvalidSchemaName):
+        tables.pop("live_status", None)  # no stream schema: profile stream never started
 
     # Forecast against actual, when a month has been checked.
     try:
