@@ -785,6 +785,15 @@ class Assistant:
                 f"narrative replaced, ranking contradicted by the result: {'; '.join(wrong)}. "
                 f"Model text: {text[:400]}",
             )
+        # True numbers can also be given to the wrong month of a comparison.
+        swapped = guards.swapped_months(text, columns, rows[:20], period)
+        if swapped:
+            return (
+                fallback,
+                "replaced",
+                f"narrative replaced, months swapped: {'; '.join(swapped[:3])}. "
+                f"Model text: {text[:400]}",
+            )
         return text, "passed", None
 
     @staticmethod

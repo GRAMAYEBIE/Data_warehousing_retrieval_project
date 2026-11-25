@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import hashlib
+import logging
+import os
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
 import httpx
 import pyarrow.parquet as pq
 
+log = logging.getLogger(__name__)
 PARQUET_MAGIC = b"PAR1"
 TIMEOUT = httpx.Timeout(30.0, read=300.0)
 
@@ -35,12 +39,35 @@ class Download:
     sha256: str
 
 
-def head(url: str) -> SourceInfo:
-    """Check that the source file exists. CloudFront answers 403 for a missing month."""
-    response = httpx.head(url, follow_redirects=True, timeout=TIMEOUT)
-    if response.status_code in (403, 404):
-        raise SourceNotAvailable(f"source file not available (HTTP {response.status_code}): {url}")
-    response.raise_for_status()
+def head(url: str, attempts: int | None = None, wait_s: float | None = None) -> SourceInfo:
+    """Check that the source file exists. CloudFront answers 403 for a missing month.
+
+    Two different failures, two different waits: a month not published yet
+    (SourceNotAvailable) is retried by Airflow hours later; a network error or a server
+    error is retried here after a few minutes (INGEST_NETWORK_RETRIES times, every
+    INGEST_NETWORK_RETRY_S seconds), instead of waiting six hours for a passing glitch."""
+    attempts = attempts or int(os.environ.get("INGEST_NETWORK_RETRIES", "6"))
+    wait_s = float(os.environ.get("INGEST_NETWORK_RETRY_S", "300")) if wait_s is None else wait_s
+    for attempt in range(1, attempts + 1):
+        try:
+            response = httpx.head(url, follow_redirects=True, timeout=TIMEOUT)
+            if response.status_code in (403, 404):
+                raise SourceNotAvailable(
+                    f"source file not available (HTTP {response.status_code}): {url}"
+                )
+            response.raise_for_status()
+            break
+        except (httpx.TransportError, httpx.HTTPStatusError) as exc:
+            server_error = not isinstance(exc, httpx.HTTPStatusError) or (
+                exc.response.status_code >= 500
+            )
+            if not server_error or attempt == attempts:
+                raise
+            log.warning(
+                "source check failed (%s), attempt %d of %d: retrying in %.0f s",
+                type(exc).__name__, attempt, attempts, wait_s,
+            )  # fmt: skip
+            time.sleep(wait_s)
     size = response.headers.get("content-length")
     etag = response.headers.get("etag")
     return SourceInfo(

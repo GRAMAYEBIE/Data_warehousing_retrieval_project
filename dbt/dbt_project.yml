@@ -35,6 +35,9 @@ vars:
   # Optional list of source months to (re)process, e.g. --vars '{months: ["2025-01-01"]}'.
   # Empty: process every month whose latest loaded batch is not in silver yet.
   months: []
+  # Months the tests of the trip tables read (macros/test_scope.sql): "YYYY-MM", the month
+  # a run loads (set by the Airflow DAG); "", the latest loaded month; "all", every month.
+  test_month: ""
 
 models:
   nyc_taxi:
@@ -54,25 +57,5 @@ seeds:
   nyc_taxi:
     +schema: silver
 
-# Tests of the two largest tables check the latest loaded month and the month before it:
-# the months a monthly run rebuilds (a new month also re-evaluates its neighbour for
-# cross-month duplicates). The bound comes from the small ingestion manifest and matches
-# the leading column of an index, so a test reads two months instead of the history.
-# (A first version compared a load timestamp with max() over the whole table, without
-# index, in every test: the fct_trip tests took more than an hour and a half.)
-# Uniqueness across months holds by construction (the key starts with the source month).
-# A backfill of an older month is tested by running dbt test without these filters.
-data_tests:
-  nyc_taxi:
-    # fct_trip keys depend only on the month itself (the neighbour is rebuilt for
-    # cross-month duplicates, which are tested in silver): test the latest month only.
-    marts:
-      fact:
-        +where: >-
-          source_month = (select max(source_month) from ops.ingestion_manifest
-          where dataset = 'yellow' and status = 'loaded')
-    intermediate:
-      trips:
-        +where: >-
-          source_month >= (select max(source_month) from ops.ingestion_manifest
-          where dataset = 'yellow' and status = 'loaded') - interval '1 month'
+# Tests of the trip tables (bronze, silver, fact) read the months a run changed, not the
+# whole history: see macros/test_scope.sql and the variable test_month above.

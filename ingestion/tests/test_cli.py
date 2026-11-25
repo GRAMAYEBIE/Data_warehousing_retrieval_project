@@ -48,3 +48,55 @@ def test_success_exits_zero(monkeypatch):
     monkeypatch.setattr(cli, "run", lambda args, settings: "already_loaded")
     monkeypatch.setattr(cli.Settings, "from_env", classmethod(lambda cls: None))
     assert cli.main(["load", "--month", "2025-01"]) == 0
+
+
+# ------------------------------------------------------------------ source check retries
+def _fake_head(monkeypatch, answers):
+    """httpx.head answering each item of `answers` in turn (a status code or an exception)."""
+    import httpx
+
+    calls = []
+
+    def head(url, **_):
+        answer = answers[len(calls)]
+        calls.append(url)
+        if isinstance(answer, Exception):
+            raise answer
+        return httpx.Response(answer, request=httpx.Request("HEAD", url),
+                              headers={"content-length": "10", "etag": '"abc"'})  # fmt: skip
+
+    monkeypatch.setattr(httpx, "head", head)
+    return calls
+
+
+def test_a_network_error_is_retried_after_minutes_not_hours(monkeypatch):
+    import httpx
+
+    from ingestion import source
+
+    calls = _fake_head(monkeypatch, [httpx.ConnectError("reset"), 503, 200])
+    info = source.head("https://example.test/f.parquet", attempts=3, wait_s=0)
+    assert len(calls) == 3 and info.etag == "abc" and info.size == 10
+
+
+def test_a_month_not_published_is_not_retried_here(monkeypatch):
+    import pytest
+
+    from ingestion import source
+
+    calls = _fake_head(monkeypatch, [403, 200])
+    with pytest.raises(source.SourceNotAvailable):
+        source.head("https://example.test/f.parquet", attempts=3, wait_s=0)
+    assert len(calls) == 1  # Airflow waits hours for a publication, not this loop
+
+
+def test_network_errors_give_up_after_the_last_attempt(monkeypatch):
+    import httpx
+    import pytest
+
+    from ingestion import source
+
+    calls = _fake_head(monkeypatch, [httpx.ConnectTimeout("t")] * 2)
+    with pytest.raises(httpx.ConnectTimeout):
+        source.head("https://example.test/f.parquet", attempts=2, wait_s=0)
+    assert len(calls) == 2

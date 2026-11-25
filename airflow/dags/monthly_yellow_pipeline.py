@@ -272,6 +272,9 @@ with DAG(
             "install_deps": False,
             "copy_dbt_packages": not os.environ.get("DBT_PACKAGES_INSTALL_PATH"),
             "callback": record_dbt_results,
+            # Tests of the trip tables read the loaded month and its neighbours only, not
+            # every month again (dbt/macros/test_scope.sql); the models are unaffected.
+            "vars": {"test_month": MONTH},
             # A two-month fct_trip rebuild exceeded 2 hours on the development host.
             "execution_timeout": timedelta(hours=4),
             "retries": 1,

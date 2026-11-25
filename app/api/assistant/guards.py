@@ -161,6 +161,60 @@ def wrong_rankings(narrative: str, columns: list[str], rows: list[list], metric:
     return problems
 
 
+MONTH_NAMES = ("january", "february", "march", "april", "may", "june", "july", "august",
+               "september", "october", "november", "december")  # fmt: skip
+
+
+def swapped_months(narrative: str, columns: list[str], rows: list[list], period: str) -> list[str]:
+    """A figure of one month quoted next to the name of the other month of a comparison.
+
+    The number check cannot see it: "March had 3.59 million trips, April 3.42 million"
+    quotes both true values, each with the wrong month. `period` is "April 2025 compared
+    with March 2025". A figure is tied to a month only when it is attached to its name
+    ("3,420,118 in March", "April had 3,592,136", "April: 3,592,136"); it must then be
+    that month's value. Nearness alone is not enough (observed: "increased to 4,005,146,
+    a 11.5 % rise from April 2025" is right). Spans of several months are not checked."""
+    current, _, previous = period.lower().partition(" compared with ")
+    names = {"current": current.split(" ")[0], "previous": previous.split(" ")[0]}
+    if (
+        not previous
+        or " to " in current + previous
+        or names["current"] == names["previous"]
+        or not all(n in MONTH_NAMES for n in names.values())
+    ):
+        return []
+    values = {"current": [], "previous": []}
+    for row in rows:
+        for column, cell in zip(columns, row, strict=True):
+            for role in values:
+                if column.endswith(f"_{role}") and isinstance(cell, (int, float, Decimal)):
+                    values[role].append(float(cell))
+    unit = r"(?:\s*(?:usd|dollars|trips?|rides?|miles?|minutes?))?"
+    problems = []
+    text = narrative.lower().replace("*", "")  # **bold** does not separate a figure
+    for match in NUMBER.finditer(text):
+        found = _numbers_in(match.group(0))
+        if not found:
+            continue
+        roles = [r for r in values if _matches(found[0], values[r])]
+        if len(roles) != 1:  # not a period value, or the same in both periods
+            continue
+        after, before = text[match.end() : match.end() + 40], text[max(0, match.start() - 30) :
+                                                                   match.start()]  # fmt: skip
+        for role, name in names.items():
+            attached = re.match(rf"{unit}\s*(?:in|for|during)\s+{name}\b", after) or re.search(
+                rf"\b{name}(?:\s+20\d\d)?\s*(?:had|was|saw|recorded|reached|:|,|\()?\s*"
+                r"(?:about|around|nearly|some|roughly)?\s*\$?\s*$",
+                before,
+            )
+            if attached and role != roles[0]:
+                problems.append(
+                    f"{match.group(0).strip()} is the {roles[0]} period's value, quoted with "
+                    f"{name.capitalize()}"
+                )
+    return problems
+
+
 def format_value(value, unit: str) -> str:
     if value is None:
         return "no value"

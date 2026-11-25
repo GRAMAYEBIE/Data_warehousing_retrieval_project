@@ -941,3 +941,40 @@ def test_key_facts_give_the_narrator_sorted_figures_and_weekday_averages():
     text = ("**About 6,658 trips** are expected on Sunday 1 June (80 % range 5,845 to 10,739). "
             "Sundays average about 6,558 trips, Mondays about 2,510.")  # fmt: skip
     assert check_model_text(text, ask, days) is None
+
+
+# ------------------------------------------------------------------ comparisons
+def test_figures_given_to_the_wrong_month_of_a_comparison_are_caught():
+    from assistant.guards import swapped_months
+
+    columns = ["trips_current", "trips_previous", "trips_change", "trips_change_pct"]
+    rows = [[3_592_136, 3_420_118, 172_018, 0.0503]]
+    period = "April 2025 compared with March 2025"
+    right = "April had **3,592,136 trips**, up 5.0 % from 3,420,118 in March."
+    assert swapped_months(right, columns, rows, period) == []
+    assert swapped_months("Trips rose to 3.59 million in April.", columns, rows, period) == []
+    # Observed and right: the figure is near "April" without being April's.
+    rise = "Trips in April 2025 increased by 172,018 to 3,592,136, a 5.0 % rise from March 2025."
+    assert swapped_months(rise, columns, rows, period) == []
+    assert swapped_months("**3,592,136 trips** in March.", columns, rows, period)
+    wrong = "March had 3,592,136 trips and April 3,420,118."
+    assert len(swapped_months(wrong, columns, rows, period)) == 2
+    # Not a comparison of two single months: nothing to check.
+    assert swapped_months(wrong, columns, rows, "April 2025") == []
+    span = "March 2025 to April 2025 compared with January 2025 to February 2025"
+    assert swapped_months(wrong, columns, rows, span) == []
+
+
+def test_a_narrative_with_swapped_months_is_replaced_by_the_factual_summary():
+    plan = QueryPlan(
+        intent=Intent.compare,
+        metrics=["trips"],
+        date_range=DateRange(period=Period.custom, start_month="2025-02", end_month="2025-02"),
+        compare_to="previous_period",
+    )
+    store = FakeStore(["period_role", "trips"], [["current", 3_592_136], ["previous", 3_420_118]])
+    a = assistant(plan=plan, narrative="January had 3,592,136 trips, February 3,420,118.",
+                  store=store)  # fmt: skip
+    answer = a.ask("Trips in February 2025 compared with January 2025")
+    assert answer.status == "answered" and answer.narrative_check == "replaced"
+    assert any("months swapped" in r for r in answer.reasons)
