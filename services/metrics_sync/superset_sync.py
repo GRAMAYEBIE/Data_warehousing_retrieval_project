@@ -39,7 +39,13 @@ DATASETS = [
             "Trips by pickup day, pickup zone, payment type, rate code, vendor and quality "
             "status (complete months only). Source: analytics.mv_trips_daily."
         ),
-        "sql": "SELECT * FROM analytics.mv_trips_daily",
+        # year and month_of_year: the same month of different years on one axis
+        # (year-over-year charts of the Executive Pulse).
+        "sql": (
+            "SELECT *, extract(year FROM month_start)::int AS year, "
+            "extract(month FROM month_start)::int AS month_of_year "
+            "FROM analytics.mv_trips_daily"
+        ),
         "main_dttm_col": "date_day",
         "rls": True,
     },

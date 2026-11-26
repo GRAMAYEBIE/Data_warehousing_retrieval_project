@@ -395,6 +395,19 @@ LAST_REFRESH = Chart(
     height=30,
 )
 
+# Change of a measure of valid trips between the latest published month and the same
+# month a year earlier, in percent; NULL (shown "n/a") when that month is not published.
+YOY = """
+    with last as (select max(source_month) as m from analytics.recon_bronze_silver),
+    v as (select d.month_start, sum({measure}) filter (where quality_status = 'valid') as v
+          from analytics.agg_trips_daily a join analytics.dim_date d on a.pickup_date_sk = d.date_sk
+          where d.month_start in ((select m from last), (select m from last) - interval '1 year')
+          group by 1)
+    select round(100.0 * (max(v) filter (where month_start = (select m from last))
+                 - max(v) filter (where month_start = (select m from last) - interval '1 year'))
+           / nullif(max(v) filter (where month_start = (select m from last) - interval '1 year'), 0), 1)
+    from v"""
+
 DASHBOARDS = [
     Dashboard(
         slug="executive-pulse",
@@ -505,6 +518,30 @@ DASHBOARDS = [
                     y_format="$,.3s",
                 ),
             ],
+            "Year over year: the same month, one line per year",
+            [
+                Chart(
+                    "Trips by calendar month, one line per year",
+                    "trips_daily",
+                    "line",
+                    "Which periods have the largest year-over-year change in trips?",
+                    ["trips"],
+                    "month_of_year",
+                    groupby=["year"],
+                    width=6,
+                ),
+                Chart(
+                    "Total revenue by calendar month, one line per year",
+                    "trips_daily",
+                    "line",
+                    "Which periods have the largest year-over-year change in revenue?",
+                    ["total_revenue"],
+                    "month_of_year",
+                    groupby=["year"],
+                    width=6,
+                    y_format="$,.3s",
+                ),
+            ],
             "Trend and reliability together",
             [
                 Chart(
@@ -584,6 +621,12 @@ DASHBOARDS = [
             "previous": """
                 select to_char(max(previous_month), 'Mon YYYY') from analytics.mv_revenue_bridge
                 where is_latest_month""",
+            # Same month a year earlier: n/a until thirteen months are published.
+            "year_before": """
+                select to_char(max(source_month) - interval '1 year', 'Mon YYYY')
+                from analytics.recon_bronze_silver""",
+            "yoy_trip_change": YOY.format(measure="trip_count"),
+            "yoy_rev_change": YOY.format(measure="sum_total_amount"),
             "volume_effect": """
                 select amount from analytics.mv_revenue_bridge where is_latest_month and step_order = 2""",
             "price_effect": """
@@ -593,6 +636,8 @@ DASHBOARDS = [
             "### So what?\n"
             "- In **{last}**, trips **{trip_change_text}** and revenue **{rev_change_text}** "
             "compared with {previous}.\n"
+            "- Against the same month a year earlier ({year_before}), trips "
+            "**{yoy_trip_change_text}** and revenue **{yoy_rev_change_text}**.\n"
             "- {volume_effect_text}, and {price_effect_text} (see the revenue bridge).\n"
             "- The CBD congestion fee, charged since 5 January 2025, makes up "
             "**{cbd_share} %** of revenue.\n"
