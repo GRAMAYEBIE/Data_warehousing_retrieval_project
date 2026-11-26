@@ -22,14 +22,14 @@ that is not implemented yet.
 | 2 | dbt: silver, quality flags, star schema, aggregates, tests, reconciliation | **Built and verified** (94/94 build steps green on two months) |
 | 3 | Airflow orchestration, publication gate, operational signals | **Built and verified** (successful run, failure and recovery, safe re-run) |
 | 4 | Semantic layer, Superset, six dashboards | **Built and verified**: semantic layer, metric parity 40/40 on three surfaces (MetricFlow, published SQL, Superset), 10 certified datasets, 6 dashboards (55 charts, each verified to return data) |
-| 5 | AI assistant: API, web interface, evaluation pack | **In progress**: API with retrieval, grounding and repairs (55 tests); evaluation 15/16 on the full pack (11/16 baseline); metric parity on a fourth surface (the assistant); report builder walk-through; prompt variants and web interface pending |
+| 5 | AI assistant: API, web interface, evaluation pack | **Built and verified**: governed planner, validator, approved templates, number checks (86 API tests); conversational answers streamed from a local model (`qwen2.5:7b`); React interface (Overview, Forecast, Shift planner, Ask, Report builder), voice input; evaluation pack |
 | 6 | Observability: metrics, logs, traces, alerts (Prometheus, Loki, Tempo, Grafana) | **Built and verified**: 12 services, 6 dashboards and 12 alert rules as code; a question gives a trace and a log line with the same trace id |
-| 7 | MLflow and demand forecasting (needs six months) | Planned |
-| 8 | Kafka: provisional stream of the current month | Planned |
+| 7 | MLflow and demand forecasting (needs six months) | **Built and verified**: trips and revenue per zone and hour, seasonal baseline and LightGBM compete on rolling backtests, forecast against actual checked every month with drift flagged ([section 12](#demand-forecast-wave-7-profile-ml)) |
+| 8 | Kafka: provisional stream of the current month | **Built and verified**: June 2025 replayed through Kafka (4,322,960 trips, 74 rejected by the contract), watched live against its forecast ([section 12](#streaming-wave-8-profile-stream)) |
 
-Loaded and published so far: `2024-12` (3,668,371 rows), `2025-01` (3,475,226 rows) and
-`2025-02` (3,577,543 rows, loaded end to end through Airflow), plus the 265 taxi zones.
-Valid-trip rate: 93.65 %, 91.44 % and 90.50 %.
+Loaded and published: six months, `2024-12` to `2025-05` (publication `load_2025_05`), plus
+the 265 taxi zones. Valid-trip rate per month between 90 % and 94 %. June 2025 is streamed
+as provisional data, not published yet.
 
 ---
 
@@ -762,10 +762,12 @@ Exports: `superset/dashboards/*.zip`, screenshots in `docs/evidence/q7/`, note `
 
 ---
 
-## 11. AI assistant (planned, Q8, Q9, Q10)
+## 11. AI assistant (Q8, Q9, Q10)
 
-Stack: FastAPI (`app/api/`), React (`app/web/`), Ollama (`qwen2.5:14b` as the main model,
-`qwen2.5:3b` for comparison and demonstration mode), Pydantic v2, SQLGlot.
+Stack: FastAPI (`app/api/`), React (`app/web/`), Ollama (`qwen2.5:7b`; on the Apple
+silicon lab machine Ollama runs natively on the GPU, the `ollama` container stays stopped),
+Pydantic v2, SQLGlot. `qwen2.5:14b` was tried and not adopted: with the whole stack running
+it left too little memory and swapped.
 
 ### Flow
 
@@ -806,17 +808,46 @@ duration, prompt variant, error).
 - **Superset builder (Q8)**: draft chart or dashboard through the REST API (prefix `[DRAFT]`, chart types limited to fixed templates), **published only after explicit confirmation**.
 - **Three prompt variants** (planning and narration) versioned in `app/api/prompts/`, compared on the evaluation pack (correctness, clarity, hallucination risk) → `docs/evidence/q9/prompt_variants.md`.
 
+### Questions about next month (forecast)
+
+"How many trips are expected in Manhattan next month?", "Which hours will be busiest?",
+"Expected revenue at JFK between 7 and 10am", "And for Queens?". Such a question never goes
+through the governed templates: a forecast is an estimate, kept apart from the measures.
+
+- **Detected and scoped by code**: forecast words with a measure or a place, or the forecast
+  month itself named; place, breakdown (zone, borough, hour, day), hours, weekdays or
+  weekends, top N are read from the words. A month already published stays on the governed
+  path. Other measures ("average fare next month") and other months are refused with the
+  reason.
+- **Fixed, parameterised SQL** on the published forecast (`ml.current_forecast`, revenue
+  forecast), read as `ai_reader`. The 80 % range is given only where it is valid (one
+  borough, one day); a total of days or hours has none, and the answer says why.
+- **Worded by the model, checked by code**: the model receives the result and key facts
+  computed by code (hours and days sorted, weekday averages) and writes the answer like any
+  other. Its text is kept only if every figure is in the result or the key facts, belongs to
+  the zone, hour or day it is quoted with (observed and caught: "8,728 trips at the peak hour
+  of 17:00" when 8,728 is 18:00), and reads as an estimate. Otherwise the text written by
+  code is shown.
+- **Shown as an estimate**: "Estimate · forecast" chip, provenance on the ml layer, the
+  method in service and its backtest error in the limits, dedicated charts (day by day with
+  the range, hourly profile with its peak, ranked zones).
+
 ### React front end: `app/web/`
 
 Vite, TypeScript, Tailwind, TanStack Query, Recharts. Types are generated from the FastAPI
-OpenAPI schema (`openapi-typescript`, `make types`); no API type is written by hand. Served
-as static files (nginx) in Compose. Screens: conversation (visible active filters, reset
-button, collapsible structured plan and provenance, Recharts chart of the result) and
-report builder (specification, preview, summary, confirmation button).
+OpenAPI schema (`openapi-typescript`, `npm run types`); no API type is written by hand.
+Served as static files (nginx) in Compose on http://localhost:8090. Pages:
 
-**Plan B**: if the front end is not ready **at the end of day 12 (27 November)**,
-`app/streamlit/` is built on the same API and the React front end is dropped, not continued
-in parallel.
+- **Overview**: the latest published month at a glance, from the governed path.
+- **Forecast**: next month per borough and day with its range, the champion and the
+  backtests, forecast against actual month after month, and the month as it streams in.
+- **Shift planner**: up to five zones over a window of hours: expected trips and revenue,
+  the range recorded over the last eight weeks, fare, duration and distance per trip. It
+  describes a zone's opportunity, shared by every taxi there; the data has no taxi or driver
+  identifier, so it never claims what one taxi would earn.
+- **Ask a question**: conversation with visible active filters, reset, streamed answer,
+  plan and provenance, chart of the result, voice input.
+- **Report builder**: specification, preview, summary, confirmation.
 
 ### Evaluation pack (Q10): `evals/cases.yaml`, at least 15 cases
 
@@ -862,11 +893,123 @@ stopped (shown as such); a question produced a Tempo trace (HTTP, `assistant.ask
 pipeline metric read showed the March run stuck in Airflow for 27 hours. The stack uses
 about 650 MB with memory limits per service.
 
-### Planned extensions
+### Demand forecast (wave 7, profile `ml`)
 
-1. ~~Prometheus + Grafana~~: built, see above.
-2. **Kafka KRaft + Schema Registry** (profile `stream`): `trips.raw` replays a Parquet file to simulate the current month; the consumer writes `bronze.yellow_trips_stream` (`is_provisional = true`), **excluded from `fct_trip` and from metrics**, purged when the official file arrives.
-3. **MLflow + demand forecast** by zone × hour (profile `ml`): LightGBM (calendar, holidays, lags) against a naive seasonal baseline; forecasts → `ml.demand_forecast` → Dashboard 2. MLflow tracks every training run (parameters, data version = published batches, metrics, model artefact in RustFS), so a forecast can be traced to the data and code that produced it.
+```bash
+docker compose --profile core --profile ml up -d mlflow             # http://localhost:5500
+docker compose --profile core --profile ml run --rm --no-deps forecast
+# replay recorded months as if forecast at the time, then check them against what happened
+docker compose --profile core --profile ml run --rm --no-deps forecast --replay 2025-04 2025-05
+```
+
+On an existing warehouse, `infra/postgres/init/08_ml.sql` is applied once by hand (it runs
+by itself on a new volume). In normal operation the Airflow DAG `demand_forecast` runs the
+job after every publication (Airflow asset `analytics_published`).
+
+**What is forecast**: recorded valid trips, and revenue (total amount paid, USD), per pickup
+zone and hour of the next month: 260 zones × 24 hours × 30 days, the empty hours kept as
+zeros. Trip volume is a proxy for demand: a ride that found no taxi leaves no trace, so the
+forecast predicts recorded trips, not need.
+
+**Two methods compete every month** (`ml/src/forecasting/`):
+
+- the **seasonal baseline**: the zone's mean at that hour and weekday over the last four
+  weeks, public holidays left out; its 80 % range comes from its own past errors, by level
+  of the forecast;
+- the **challenger**: LightGBM (Poisson objective; calendar, holiday, lags at four and eight
+  weeks, zone-hour level, demand tier), with quantile models (10 % and 90 %) for its range.
+
+**Rolling backtests, never a random split**: each of the last three months is forecast from
+the weeks before it, the model trained on the earlier months only. The model replaces the
+baseline only if it wins most months, has the better mean error and is not worse on the
+busiest zones (92 % of trips). Error is WMAPE (defined with zero hours, weighted by trips),
+reported per borough, per demand tier (high ≥ 20 trips an hour, medium ≥ 2, low ≥ 0.2,
+sparse below) and per borough and day; sparse zones are flagged low confidence, never
+hidden in an average.
+
+| Test month | Baseline, zone-hour | Model, zone-hour | Baseline, borough-day | Winner |
+|---|---|---|---|---|
+| March 2025 | 19.2 % | 21.0 % | 6.9 % | baseline |
+| April 2025 | 19.4 % | 21.7 % | 5.2 % | baseline |
+| May 2025 | 21.3 % | 20.8 % | 11.7 % | model |
+
+The model won one month in three, so **the baseline is in service** and LightGBM stays the
+challenger, retrained and tested every month. Revenue: the model won none of the three months
+(mean error 24.4 % against 22.3 %). The 80 % range held 85.9 % of the zone-hours of May.
+Negative result kept: a four-week trend feature made May worse and was removed.
+
+Forecast published for **June 2025**: 3.85 million trips, 111.0 million USD.
+
+**MLflow** (experiments `demand_forecast`, `revenue_forecast`; backend in PostgreSQL
+`mlflow_meta`, artefacts in RustFS): each run records the data publication, the months, the
+decision and its reasons, a fingerprint of the code, the settings, the scores of every
+backtest and the model. Every model version gets the alias `challenger`; `production` only
+while the model is the champion.
+
+**Forecast against actual, month after month** (`check.py`): when a month is published (by
+the batch pipeline, after its stream), the job first compares the published forecast of
+that month with what was recorded, before replacing it: error, bias, 80 % coverage per
+zone-hour, borough, tier and borough-day, against the error the backtests promised. A month
+more than 1.5 times above it (and 3 points) is flagged as **drift**. Results stay in
+`ml.forecast_check*` and on the MLflow run that made the forecast. April and May were
+replayed (forecast again from the months before them only) to start the history:
+
+| Month | Error per borough and day | Promised | Bias | Days in the 80 % range | Verdict |
+|---|---|---|---|---|---|
+| April 2025 | 5.2 % | 6.9 % | +0.6 % | 43 % | as expected |
+| May 2025 | 11.7 % | 6.0 % | −6.6 % | 76 % | **drift** |
+
+What the check found: in May activity rose and the four-week baseline lagged behind it (17
+to 24 % too low outside Manhattan, Brooklyn −23.9 %), while the Memorial Day weekend was
+forecast too high; in April the borough-day range was too narrow (calibrated on one test
+month only). Revenue: April 6.1 % (promised 10.2 %), May 14.6 % (promised 8.2 %), drift.
+
+The forecast is used by the **Forecast** page, the **Shift planner** and forecast questions
+in the assistant (section 11).
+
+### Streaming (wave 8, profile `stream`)
+
+```bash
+docker compose --profile core --profile stream up -d kafka stream-consumer kafka-ui
+# Kafka UI: http://localhost:8085 (bound to localhost: it has no login of its own)
+docker compose --profile core --profile stream run --rm --no-deps stream-producer \
+    produce --month 2025-06 --speed 4320        # a day every 20 seconds, the month in 10 minutes
+```
+
+On an existing warehouse, `infra/postgres/init/09_stream.sql` is applied once by hand.
+
+The TLC publishes a month about two months late. The stream shows the current month as it
+happens, before the official file, without ever mixing provisional rows with the governed
+measures.
+
+- **Kafka 3.9 in KRaft mode** (one broker, no ZooKeeper). Topic `trips.yellow.raw`: three
+  partitions keyed by pickup zone (a zone's trips stay in order), kept three days; dead
+  letters in `trips.yellow.dlq`, kept thirty days.
+- **Producer** (`services/stream`): replays the monthly file in pickup order, faster than
+  real time, idempotent and compressed (lz4).
+- **Contract `yellow_trip/v1`**: structure and impossible values are rejected (unknown
+  schema, missing field, wrong type, unknown zone, impossible distance or amount) to the
+  dead-letter topic and `stream.yellow_trips_rejects` with the reason. Business quality (a
+  negative total, a zero distance) is not a rejection: the quality flags judge it later.
+- **Consumer**: batches written in one transaction; offsets committed to Kafka only after
+  the database; the trip key (source month, row of the file, as in bronze) makes a
+  redelivery a no-op. At least once delivery, exactly once rows.
+- **Provisional by construction**: `stream.yellow_trips` is in its own schema, written by the
+  role `streamer` only; never in silver, `fct_trip` or a metric. Once the official month is
+  published, readers ignore it.
+- **Live view** (Forecast page, refreshed every 10 seconds): trips received against the
+  forecast of the same days, counted with the plausibility rules of silver (distance,
+  duration, speed, known zones), complete days only.
+
+**June 2025 replayed** at 4,320 times real time: 4,322,960 trips sent in about ten minutes,
+74 rejected by the contract (distances above 100,000 miles in the source file), the rest
+stored once. After five complete days, June ran 4.9 % above its forecast, consistent with
+the drift found in May. When the official June file is published, the forecast job checks
+June against it and forecasts July: the loop continues.
+
+Change from the original plan: no Schema Registry. With one producer and one consumer, the
+contract is a versioned JSON schema checked in code, with a dead-letter topic; Avro with a
+registry is the step for several independent producers.
 
 ### Machine learning: the data is heavily imbalanced, so the method must be careful
 
@@ -963,7 +1106,9 @@ tasks and publication, 4 spaced 6 hours apart for the source check.
 Task durations are in the Airflow UI and `ops.pipeline_runs` keeps the start and end of
 every run. All signals are published to `analytics` for Dashboard 5.
 
-**CI (planned)**: ruff, sqlfluff, pytest, eslint and tsc.
+**CI** (`.github/workflows/ci.yml`, on every push): ruff and pytest for ingestion, the
+assistant API, metrics sync, Airflow helpers, the forecasting job and the stream service;
+dbt parse and the semantic manifest; Prometheus, Alertmanager and Grafana configuration.
 
 ### Services
 
@@ -974,15 +1119,21 @@ every run. All signals are published to `analytics` for Dashboard 5.
 | ingestion (one-shot job) | – | tools | built |
 | airflow-init (one-shot: database migration, dbt manifest) | – | orchestration | built |
 | airflow (api-server, scheduler, dag-processor) | 8080 | orchestration | built |
-| dbt-docs | 8085 | core | planned |
 | superset-init (one-shot: database upgrade, admin, roles) | – | bi | built |
 | superset 6.1.0 + redis | 8088 | bi | built |
-| ollama | 11434 | ai | planned |
-| api (FastAPI) | 8000 | ai | planned |
-| web (React, nginx) | 3000 | ai | planned |
+| ollama (or native Ollama on Apple silicon) | 11434 | ai | built |
+| api (FastAPI) | 8000 | ai | built |
+| web (React, nginx) | 8090 (localhost) | ai | built |
+| speech (voice input) | – | ai | built |
+| mlflow | 5500 | ml | built |
+| forecast (job: check, backtest, choose, publish) | – | ml | built |
+| kafka (KRaft), stream-consumer, stream-producer (job) | – | stream | built |
+| kafka-ui | 8085 (localhost) | stream | built |
+| Prometheus, Alertmanager, Grafana, Loki, Alloy, Tempo, exporters | 9090, 9093, 3000 (localhost) | observability | built |
 
-Health checks on every service, named persistent volumes,
-`depends_on: condition: service_healthy`.
+One-shot jobs (`airflow-init`, `superset-init`, `ingestion`, `forecast`, `stream-producer`)
+exit with code 0 when done; they are not meant to stay running. Health checks on every
+long-running service, named persistent volumes, `depends_on: condition: service_healthy`.
 
 ---
 
@@ -1012,18 +1163,21 @@ Q9 are never cut.
 ├── Makefile
 ├── docker-compose.yml
 ├── .env.example
-├── infra/postgres/init/     # schemas, roles, bronze and manifest tables
+├── infra/postgres/init/     # schemas, roles, bronze and manifest tables, ml (08), stream (09)
+├── infra/mlflow/            # MLflow tracking server image
+├── infra/observability/     # Prometheus, Alertmanager, Loki, Alloy, Tempo, Grafana as code
 ├── ingestion/               # landing, source contracts, manifest, bronze loader, tests
 ├── docs/
 │   ├── exam/                # exam paper
 │   └── evidence/            # logs, measures and screenshots per question
-│
-│   Added by later waves:
-├── airflow/dags/            # monthly_yellow_pipeline.py
+├── airflow/dags/            # monthly_yellow_pipeline.py, demand_forecast.py
 ├── dbt/                     # models/{staging,intermediate,marts,semantic}, macros, tests, seeds
+├── ml/                      # forecasting job: data, features, model, pipeline, check, store, tracking
 ├── services/metrics_sync/
-├── app/api/                 # FastAPI: planner, validator, resolver, superset_client, narrator, prompts/
+├── services/stream/         # Kafka producer (replay) and consumer, message contract
+├── app/api/                 # FastAPI: planner, validator, resolver, guards, forecast, planner, prompts/
 ├── app/web/                 # React (Vite)
+├── app/speech/              # speech-to-text for voice questions
 ├── superset/dashboards/     # exports
 ├── evals/                   # cases.yaml, runner
 ├── tests/                   # consistency, end-to-end smoke
@@ -1072,6 +1226,16 @@ dashboard and explain the approval step · show a limitation the platform honest
 - No full year-over-year comparison with 13 months.
 - MetricFlow is not connected directly to Superset (governed fallback and consistency test).
 - The LLM can misinterpret a question: validation, provenance and human review are required.
+  A known gap: the number check verifies that a figure is in the result, not its unit (a
+  percentage once described as trips in a comparison by borough).
+- The forecast predicts recorded trips, not need. Six months of history: no June, no
+  summer and no year-over-year pattern in training; a holiday such as Juneteenth (19 June)
+  is known from the calendar but has never been seen. The seasonal baseline lags a rising
+  trend (drift in May); a trend correction is the next improvement.
+- The shift planner describes a zone's opportunity, shared by every taxi working it: the
+  data has no taxi or driver identifier, so no per-taxi earnings.
+- Streamed rows are provisional and approximately filtered (no duplicate detection across
+  files); only the official file is published and measured.
 
 Future improvements: a columnar warehouse engine for larger volumes, a semantic layer
 queried directly by every tool, separate environments and backups.
@@ -1080,5 +1244,9 @@ queried directly by every tool, separate environments and backups.
 
 ## 18. Next step
 
-Wave 3: Airflow orchestration with Cosmos, the publication gate to `analytics`, and the
-operational signals.
+1. Publish June 2025 through the monthly pipeline: the forecast job then checks the live
+   June forecast against it and forecasts July.
+2. Final deliverables: proposal (Q1), architecture and data-model diagrams, data
+   dictionary, dashboard exports, demonstration video, submission zip.
+3. If time allows: a trend correction for the seasonal baseline, consumer lag and drift
+   alerts in Grafana, a unit check on comparison narratives.

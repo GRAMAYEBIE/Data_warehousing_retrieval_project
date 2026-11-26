@@ -38,6 +38,14 @@ jobs:
           - name: bootstrap-script
             dir: scripts
             requirements: ingestion/requirements.txt
+          - name: demand-forecast
+            dir: ml
+            requirements: ml/requirements.txt
+            install_package: true
+          - name: stream
+            dir: services/stream
+            requirements: services/stream/requirements.txt
+            install_package: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
