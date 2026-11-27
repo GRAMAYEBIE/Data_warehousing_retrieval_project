@@ -32,6 +32,17 @@ METRIC_SOURCE = "Governed metric, defined in dbt/models/semantic/_metrics.yml"
 # (airflow/include/nyc_taxi_ops/publish.py, BI_VIEWS): dimensions already joined, complete
 # months only, indexed. A chart is a scan of one indexed view; the first version, with the
 # joins inside each dataset, timed out at 120 s on the development machine.
+# complete_week: the day belongs to a whole week inside the published months (Monday on or
+# after the first month's start, up to the last Sunday of the latest month). Weekly charts
+# keep these days only (dashboards.WEEK_FILTER): the last, partial week read "-59 % vs
+# previous period" on the weekly trips KPI (28-30 September 2026), and the first one started
+# the curves near zero. Computed here: Superset refuses sub-queries in a chart's custom SQL.
+COMPLETE_WEEK = (
+    "(date_day >= date_trunc('week', (SELECT min(source_month) "
+    "FROM analytics.recon_bronze_silver) + interval '6 days') "
+    "AND date_day < date_trunc('week', (SELECT max(source_month) "
+    "FROM analytics.recon_bronze_silver) + interval '1 month')) AS complete_week"
+)
 DATASETS = [
     {
         "name": "trips_daily",
@@ -43,7 +54,7 @@ DATASETS = [
         # (year-over-year charts of the Executive Pulse).
         "sql": (
             "SELECT *, extract(year FROM month_start)::int AS year, "
-            "extract(month FROM month_start)::int AS month_of_year "
+            f"extract(month FROM month_start)::int AS month_of_year, {COMPLETE_WEEK} "
             "FROM analytics.mv_trips_daily"
         ),
         "main_dttm_col": "date_day",
@@ -55,7 +66,7 @@ DATASETS = [
             "Trips by pickup day and hour, pickup zone, service period, airport flag and "
             "quality status (complete months only). Source: analytics.mv_trips_hourly."
         ),
-        "sql": "SELECT * FROM analytics.mv_trips_hourly",
+        "sql": f"SELECT *, {COMPLETE_WEEK} FROM analytics.mv_trips_hourly",
         "main_dttm_col": "date_day",
         "rls": True,
     },
@@ -75,7 +86,7 @@ DATASETS = [
             "Data quality by source month, pickup day, vendor, pickup zone and payment type: "
             "trips per status and per flag. Source: analytics.mv_quality_daily."
         ),
-        "sql": "SELECT * FROM analytics.mv_quality_daily",
+        "sql": f"SELECT *, {COMPLETE_WEEK} FROM analytics.mv_quality_daily",
         "main_dttm_col": "date_day",
         "rls": True,
     },

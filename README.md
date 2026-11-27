@@ -738,7 +738,9 @@ docker compose --profile core --profile tools run --rm -e SUPERSET_URL=http://su
 - `services/metrics_sync/dashboards.py`: six dashboards, 57 charts of 15 kinds (trend
   KPIs, dual-axis bars and line, rolling mean, heatmap, origin-destination matrix,
   bubble chart, treemap, revenue waterfall, growth and decline rankings, anomaly table).
-  Every chart description states the strategic question it answers. Every dashboard has
+  Every chart description states the strategic question it answers. Weekly charts show
+  whole weeks only (dataset column `complete_week`): the partial week at the end of the
+  latest month made the weekly trips KPI read "-59 %". Every dashboard has
   a header with its question, a data-quality tile, a "last refreshed" tile, date and
   borough filters, cross filters, and a short "So what?" block in plain English (bullets,
   "rose by" / "fell by" rather than signed numbers), computed from the published tables
@@ -881,6 +883,10 @@ instruction, invalid date, conflicting filters, model unavailable, dashboard cre
 Fields: `expected_intent, expected_metrics, expected_filters, expected_behaviour, outcome`.
 Runner: `make eval` → `docs/evidence/q10/eval_results.md`. One observed failure and its
 specific fix are documented.
+
+Latest run, 27 November 2026, on the 22 published months and after the grounding and
+narrative fixes of the same day (`docs/evidence/q09/`): **20 of 20 cases pass**, median
+8.6 s with `qwen2.5:7b` on the lab machine (`docs/evidence/q10/eval_mac_22months_qwen2.5-7b.md`).
 
 ---
 

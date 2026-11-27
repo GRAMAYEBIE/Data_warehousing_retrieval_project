@@ -77,6 +77,22 @@ class Dashboard:
     filter_datasets: list[str]
 
 
+# Weekly charts show complete weeks only: the week that runs past the end of the latest
+# published month (and the cross-month trips of the next days) is cut. Observed: the weekly
+# trips KPI read "-59 % vs previous period" for the three days of 28-30 September 2026.
+# The flag is a column of the datasets (superset_sync.COMPLETE_WEEK).
+WEEK_FILTER = {"col": "complete_week", "op": "==", "val": True}
+
+
+def week_cut(chart: Chart) -> dict | None:
+    """The filter keeping complete weeks, for a weekly chart; None otherwise."""
+    return WEEK_FILTER if chart.grain == "P1W" and chart.x == "date_day" else None
+
+
+def all_filters(chart: Chart) -> list[dict]:
+    return chart.filters + ([WEEK_FILTER] if week_cut(chart) else [])
+
+
 def adhoc(f: dict) -> dict:
     return {
         "clause": "WHERE",
@@ -106,7 +122,7 @@ def _form_data(chart: Chart, dataset_id: int) -> dict:
     base = {
         "datasource": f"{dataset_id}__table",
         "viz_type": "",
-        "adhoc_filters": [adhoc(f) for f in chart.filters]
+        "adhoc_filters": [adhoc(f) for f in all_filters(chart)]
         + (
             [{"clause": "HAVING", "expressionType": "SQL", "sqlExpression": chart.having}]
             if chart.having
@@ -343,7 +359,7 @@ def query_context(chart: Chart, dataset_id: int) -> dict:
     query = {
         "columns": columns,
         "metrics": metrics,
-        "filters": [{"col": f["col"], "op": f["op"], "val": f["val"]} for f in chart.filters],
+        "filters": [{"col": f["col"], "op": f["op"], "val": f["val"]} for f in all_filters(chart)],
         "extras": {"having": chart.having} if chart.having else {},
         "row_limit": chart.limit,
         "orderby": (

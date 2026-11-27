@@ -41,3 +41,29 @@ def test_chart_titles_are_unique():
     shared = {d.DATA_QUALITY.title, d.LAST_REFRESH.title}
     others = [t for t in titles if t not in shared]
     assert len(others) == len(set(others))
+
+
+def test_weekly_charts_show_complete_weeks_only():
+    # Observed: the weekly trips KPI read "-59 % vs previous period" for the three days of
+    # 28-30 September 2026, the end of the latest published month.
+    weekly = [
+        c
+        for spec in d.DASHBOARDS
+        for row in spec.rows
+        if not isinstance(row, str)
+        for c in row
+        if isinstance(c, d.Chart) and c.grain == "P1W"
+    ]
+    assert len(weekly) >= 4
+    for chart in weekly:
+        assert d.week_cut(chart) == d.WEEK_FILTER, chart.title
+        assert d.adhoc(d.WEEK_FILTER) in d.form_data(chart, 1)["adhoc_filters"]
+        assert d.WEEK_FILTER in d.query_context(chart, 1)["queries"][0]["filters"]
+    # Superset refuses sub-queries in a chart's SQL: the flag is a column of the dataset.
+    import superset_sync as s
+
+    for name in ("trips_daily", "trips_hourly", "quality_daily"):
+        sql = next(x["sql"] for x in s.DATASETS if x["name"] == name)
+        assert "AS complete_week" in sql, name
+    monthly = d.Chart("t", "trips_daily", "line", "q", ["trips"], "date_day", "P1M")
+    assert d.week_cut(monthly) is None

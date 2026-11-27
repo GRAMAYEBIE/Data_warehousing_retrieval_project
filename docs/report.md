@@ -364,7 +364,7 @@ and a dashboard request. Each records the expected intent, metrics, filters and 
 |---|---|
 | First baseline (`qwen2.5:3b` on the laptop CPU) | 11 of 16 |
 | After grounding the plan in the question | 15 of 16 |
-| Final, `qwen2.5:7b` on the lab machine's GPU | 20 of 20 (median 8.3 s) |
+| Final, `qwen2.5:7b` on the lab machine's GPU, 22 months (27 November) | 20 of 20 (median 8.6 s) |
 
 **One observed failure and its fix.** *"What was the tip rate in Brooklyn last month?"*
 was planned with a filter copied from a retrieved example (payment type cash) and without
