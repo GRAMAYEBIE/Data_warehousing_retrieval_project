@@ -63,8 +63,17 @@ pre code { background: none; padding: 0; }
 figure { margin: 8pt 0 10pt; break-inside: avoid; text-align: center; }
 figure img { width: 100%; max-height: 120mm; object-fit: contain; }
 figcaption { font-size: 10.5pt; font-style: italic; margin-top: 3pt; }
-/* A tall diagram may use almost the whole page height, so its labels stay readable. */
-figure.tall img { max-height: 225mm; }
+/* A tall diagram uses most of the page height, so its labels stay readable. */
+figure.tall img { max-height: 165mm; }
+/* Screenshots: a thin frame around the image itself. */
+figure img.shot { border: 0.6pt solid var(--line); width: auto; max-width: 100%;
+                  max-height: 95mm; }
+figure.compact img.shot { max-height: 72mm; }
+/* Two screenshots side by side, bottom-aligned, one caption: a wide one and a tall one. */
+figure.pair .row { display: flex; gap: 4mm; align-items: flex-end; justify-content: center; }
+figure.pair .row > img { height: auto; max-height: none; object-fit: contain; }
+figure.pair .row > img:first-child { width: 58%; }
+figure.pair .row > img:last-child { width: 38%; }
 .toc { margin: 10pt 0; padding: 8pt 12pt; border: 0.8pt solid var(--line); text-align: left; }
 .toc p { margin: 0; }
 /* Cover page (report): a full first page, then the text. */

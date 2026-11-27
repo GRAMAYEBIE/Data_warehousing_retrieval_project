@@ -32,8 +32,8 @@ a Kafka stream that shows the current month before its official file.
 layer; a figure can be traced from its row in the Parquet file to a chart or an AI answer.
 40 of 40 metric checks give the same value in dbt, Superset and the assistant's SQL. The
 assistant passes 20 of 20 evaluation cases and never runs SQL written by the model. A
-failed run never changes what users see. The June 2025 forecast was 6.0 % off per borough
-and day, better than the 7.9 % its tests promised.
+failed run never changes what users see. The demand forecast learns from its own errors:
+replayed over the last six months, its error per borough and day fell from 11.4 % to 9.2 %.
 
 <div class="toc" markdown="1">
 
@@ -95,11 +95,11 @@ AI would let it invent definitions and give figures that do not match the dashbo
 
 | Area | Success measure and target | Measured |
 |---|---|---|
-| Data freshness | A month published within 24 h of its TLC file; publication date shown on every answer | Monthly run with source check; June 2025 published 15 min after its run started |
-| Data quality | Valid-trip rate ≥ 85 %; 0 unexplained rows between raw and cleaned data; 0 failed blocking test before publication | 90 % to 94 % per month; every row explained; publication refused on a failed test |
-| Dashboard usefulness | Every chart answers a named business question; 100 % of charts return data; same metric, same value in every tool | 6 dashboards, 55 charts, all returning data; 40 of 40 metric checks identical |
+| Data freshness | A month published within 24 h of its TLC file; publication date shown on every answer | Median 20 min from the source check to publication (26 runs, longest 34 min) |
+| Data quality | Valid-trip rate ≥ 85 %; 0 unexplained rows between raw and cleaned data; 0 failed blocking test before publication | 83.6 % to 94.1 % per month, under target once (November 2025, section 5); 0 unexplained rows in 86 million; publication refused on a failed test |
+| Dashboard usefulness | Every chart answers a named business question; 100 % of charts return data; same metric, same value in every tool | 6 dashboards, 57 charts, all returning data; 40 of 40 metric checks identical |
 | AI trustworthiness | 100 % of figures in an answer come from an approved query; ≥ 90 % of evaluation cases pass; 0 model-written SQL executed | 20 of 20 cases pass; a text with a figure not in the result is replaced |
-| Delivery reliability | ≥ 95 % of monthly runs succeed without manual action; a failed run never changes published data | Failure tested: published data unchanged; the stack came back alone after two host restarts |
+| Delivery reliability | ≥ 95 % of monthly runs succeed without manual action; a failed run never changes published data | 26 of 26 runs on the lab machine; a failed run tested: published data unchanged; the stack came back alone after two host restarts |
 
 **Risks needing human review**: source-data quality (9 to 16 % of rows without payment type
 or rate code, impossible values); LLM-generated insight (a misread question, a true figure
@@ -108,8 +108,6 @@ given to the wrong month, a guess presented as a cause); trips as a proxy for de
 cause.
 
 ## 3. Architecture
-
-<figure class="tall"><img src="diagrams/architecture.svg" alt="Architecture of the platform"><figcaption>Figure 1. Architecture: from the TLC file to dashboards and the AI assistant.</figcaption></figure>
 
 The design follows one rule: **users only ever read data that passed every check.** Raw
 files land untouched in an S3-compatible object store: **RustFS**. The exam recommends
@@ -122,7 +120,7 @@ schemas: bronze (as received), silver (typed and flagged), gold (star schema and
 aggregates) and analytics, a copy of the approved gold tables written by a separate
 publication task only when the whole dbt build is green. Superset and the assistant can
 read analytics only. Airflow runs the whole sequence each month. Each component runs in its
-own container with a health check; everything starts with Docker Compose.
+own container with a health check; everything starts with Docker Compose (Figure 1).
 
 ## 4. Source, ingestion and bronze layer (Q2)
 
@@ -150,6 +148,8 @@ bronze, schema version and hash, drift report, timestamps and errors.
 | Safe re-run | 2025-01 again: same checksum, `skipped_unchanged` in 4 seconds |
 | File missing | 2027-01: HTTP 403, status `failed` with the error, nothing changed |
 | Source adds a column | unknown column kept in a JSON column with a warning; a missing required column or a wrong type stops the load |
+
+<figure class="tall"><img src="diagrams/architecture.svg" alt="Architecture of the platform"><figcaption>Figure 1. Architecture (section 3): from the TLC file to dashboards and the AI assistant.</figcaption></figure>
 
 ## 5. Medallion architecture and data quality (Q3)
 
@@ -181,11 +181,14 @@ only and `total_amount` is the governed revenue measure.
 | 2025-01 | 3,475,226 | 3,475,226 | 0 | 3,177,890 | 152,379 | 144,957 | 91.44 % |
 
 The bronze → silver reconciliation (`gold.recon_bronze_silver`) also matches every cent of
-`total_amount` (gap 0.00) and is a blocking test: a gap stops publication.
+`total_amount` (gap 0.00) and is a blocking test: a gap stops publication. Over the 22
+months, 86 million rows, none is unexplained. One month missed the 85 % target:
+**November 2025, 83.6 %**, because one vendor, Curb Mobility, reported negative amounts on
+12 % of its trips (9 % in October, 1 % in December; 0 % for the others). The rows stay,
+flagged; the dashboards and every answer on that month show the warning, and the vendor
+comparison of Dashboard 5 makes the cause visible.
 
 ## 6. Dimensional model and dbt (Q4)
-
-<figure><img src="diagrams/star_schema.svg" alt="Star schema"><figcaption>Figure 2. Star schema at the grain of one completed taxi trip (dashed: optional extensions).</figcaption></figure>
 
 `fct_trip` has one row per completed trip. Its surrogate key is deterministic and readable:
 `20250100001204` is row 1204 of the January 2025 file, identical after any reload, which
@@ -196,8 +199,9 @@ code also "Not reported" (`-2`), so no trip is lost in a join. The full data dic
 The dbt project (`dbt/`) has staging, intermediate (silver) and mart (gold) layers with:
 source definitions and a freshness check on the ingestion manifest (warn after 45 days,
 error after 75); tests of uniqueness, non-null keys, accepted values and relationships from
-the fact to every dimension; two business assertions (no row lost between bronze and
-silver; every valid trip respects the thresholds); an incremental strategy by source month,
+the fact to every dimension; three business assertions (no row lost between bronze and
+silver; every valid trip respects the thresholds; every valid trip has a calendar date,
+section 15); an incremental strategy by source month,
 which rebuilds a month and its two neighbours (a trip can sit in the next month's file),
 with a full refresh when a rule, a dimension or the contract changes; partitions and
 indexes on the fact; documentation and lineage exported to `docs/dbt_docs/`; and reusable
@@ -206,6 +210,8 @@ the flag list and the documentation) and safe casts that return NULL instead of 
 First build: 94 of 94 steps passed. The first-ever build also produced a useful failing
 test: the reconciliation test failed because December was in bronze but not in silver;
 building the missing month fixed it.
+
+<figure><img src="diagrams/star_schema.svg" alt="Star schema"><figcaption>Figure 2. Star schema at the grain of one completed taxi trip (dashed: optional extensions).</figcaption></figure>
 
 ## 7. Orchestration, reliability and observability (Q5)
 
@@ -233,8 +239,8 @@ fails or when dbt tests fail.
 Five operational signals are written for every run: freshness, volume against the previous
 month (more than 50 % blocks publication), rejected-row rate, late-data rate and dbt test
 pass rate. They feed Dashboard 5 and Prometheus; Grafana shows the pipeline, the data age
-and quality, and 12 alert rules cover stale data, low valid-trip rate, failed runs and the
-assistant.
+and quality, and 14 alert rules cover stale data, low valid-trip rate, failed runs, the
+assistant, a drifting forecast and a lagging Kafka consumer.
 
 ## 8. Semantic layer and governed metrics (Q6)
 
@@ -284,7 +290,10 @@ number quoted in these texts comes from a query. In total, 57 charts, each descr
 question it answers. **Year-over-year** comparisons, asked by Dashboard 1, became possible
 once thirteen months were published: two charts draw each calendar month with one line per
 year, and the "So what?" block compares the latest month with the same month a year
-earlier. Screenshots and exports are in `docs/evidence/q07/`.
+earlier. Screenshots of the six dashboards, their export and the metrics each chart uses
+are in `docs/evidence/q07/`.
+
+<figure><img class="shot" src="figures/dashboard_executive_pulse.png" alt="Dashboard 1, Executive Pulse"><figcaption>Figure 3. Dashboard 1, Executive Pulse, after the September 2026 publication: months, revenue drivers, valid versus all trips, boroughs, and year over year (one line per year).</figcaption></figure>
 
 ## 10. AI report and dashboard builder (Q8)
 
@@ -302,7 +311,8 @@ anything is published. **Publication needs explicit confirmation**: without
 `confirm = true` the API answers HTTP 409 and the draft stays a draft. A request the data
 cannot answer, such as *"a dashboard of driver earnings per shift"*, is rejected (HTTP 422)
 with the reason. Every step is written to the audit log. Evidence:
-`docs/evidence/q08/report_builder.md`.
+`docs/evidence/q08/report_builder.md`; the draft built for the request above is Figure 4
+(left).
 
 ## 11. Natural-language questions over the gold layer (Q9)
 
@@ -327,20 +337,19 @@ only what they name. An extract of the evaluation transcript (`qwen2.5:7b`):
 > **Manager:** And for Queens?
 >
 > **Assistant:** **21.5 %** is the tip rate for card trips in Queens during April 2025. *[plan adjusted by code: measure and period kept from the previous question, borough replaced]*
- Vague questions get a clarifying question,
-empty results an explanation, unanswerable questions a refusal with the reason, and model
-downtime a clear message (HTTP 503). Every answer cites the metric definition and formula,
-the months used, the publication and its timestamp, the filters, the valid-trip rate of the
-period and the exact SQL run.
 
-**Three prompt variants** were compared on the evaluation pack with the same model
-(`qwen2.5:3b`, laptop CPU). The *minimal* prompt passed 15 of 16 cases: asked "How are we
-doing?", it guessed a five-metric breakdown instead of asking what the manager meant, the
-clearest hallucination risk. The *explicit rules* prompt passed 13 of 16: it made the same
-guess, and being longer it was slower, so two cases ran out of time. The *structured
-examples* prompt passed 16 of 16: it asked a clarifying question and stayed within the
-catalogue. It was kept. Questions about next month are
-answered from the forecast, labelled as estimates (section 15).
+Vague questions get a clarifying question, empty results an explanation, unanswerable
+questions a refusal with the reason, and model downtime a clear message (HTTP 503). Every
+answer cites the metric definition and formula, the months used, the publication and its
+timestamp, the filters, the valid-trip rate of the period and the exact SQL run (Figure 4,
+right).
+
+**Three prompt variants** were compared on the evaluation pack (`qwen2.5:3b`, laptop CPU).
+*Minimal* passed 15 of 16 cases: asked "How are we doing?", it guessed a five-metric
+breakdown instead of asking what the manager meant. *Explicit rules* passed 13 of 16: the
+same guess, and two time-outs from its length. *Structured examples* passed 16 of 16: it
+asked a clarifying question and stayed within the catalogue, so it was kept. Questions
+about next month are answered from the forecast, labelled as estimates (section 15).
 
 ## 12. Evaluation, safety and testing (Q10)
 
@@ -361,9 +370,13 @@ was planned with a filter copied from a retrieved example (payment type cash) an
 Brooklyn. A better model was not the fix: code now applies the period named in the
 question, removes any filter value the question does not name, and rejects a plan that
 omits a named zone or borough, giving the model one repair. The case and its follow-up
-*"And for Queens?"* now pass. Automated tests: 86 API tests, dbt tests, ingestion,
+*"And for Queens?"* now pass. A second guard came from a real answer: the model wrote
+"37.69 trips" for a percentage, so code now checks the unit after each figure and replaces
+such a text. Automated tests: 88 API tests, dbt tests, ingestion,
 forecasting and stream tests, run by GitHub Actions on every push, plus an end-to-end smoke
 test.
+
+<figure class="pair"><div class="row"><img class="shot" src="figures/draft_dashboard_superset.png" alt="Draft dashboard created by the assistant"><img class="shot" src="figures/assistant_answer_provenance.png" alt="Assistant answer with its provenance"></div><figcaption>Figure 4. Left (Q8): the request of section 10 built as a [DRAFT] Superset dashboard, waiting for confirmation. Right (Q9): "What was the total revenue last month by pickup borough?", every figure checked against the result, then how it was produced: definition and formula, filters, period, publication, template and read-only role, valid-trip rate.</figcaption></figure>
 
 ## 13. Security, governance and ethical use (Q11)
 
@@ -408,36 +421,82 @@ and `tests/`.
 
 ## 15. Extensions: forecasting and streaming
 
-**Demand forecast.** Next month's trips and revenue are forecast per zone and hour. Two
-methods compete every month on rolling backtests (each of the last three months forecast
-from the weeks before it, never a random split): a seasonal baseline and a LightGBM model.
-The model replaces the baseline only if it wins most months, on average and on the busiest
-zones; errors are reported per borough and demand level so that the busy Manhattan zones
-cannot hide the rest. The baseline has stayed in service. Every run is tracked in MLflow.
+**Demand forecast.** Next month's trips and revenue are forecast per zone, day and hour,
+always labelled as estimates. Three methods compete every month:
 
-**The loop.** When a month is published, the job first compares its forecast with what
-happened, then forecasts the next one. A month whose error is well above what the tests
-promised is flagged as drift. May 2025 was flagged (11.7 % against 6.0 %: activity rose and
-the four-week baseline lagged); June 2025, the first live check, came in at 6.0 % against
-7.9 % promised.
+- the **seasonal baseline**: the zone's mean at that hour and weekday over the last four weeks;
+- the **adjusted baseline**: the same, corrected per borough by the recent trend (last two
+  weeks against the two before, halved, within ±10 %) and by that month's usual change a
+  year earlier (within −20 % and +25 %);
+- a **LightGBM** model: gradient-boosted trees with a Poisson objective (trip counts) and
+  quantile models for the 80 % range, on calendar, profile, trend, last-year and
+  last-month-error features.
+
+They are scored on rolling backtests: each of the last three months is forecast from the
+weeks before it, never from a random split. The error is the weighted absolute percentage
+error (WMAPE) per borough and day, also reported per demand level so that the busy
+Manhattan zones cannot hide the rest. A challenger replaces the seasonal baseline only if it
+wins most months, on average and on the busiest zones. The 80 % range is calibrated on the
+real errors of the six previous months. Every run is tracked in MLflow: parameters,
+backtest scores, the champion and the reason it was chosen.
+
+**Learning from its errors.** When a month is published, the job first checks the forecast
+made for it against what happened, then forecasts the next month. The gap is used three
+ways: last month's error per zone and borough is a model feature; training weights favour
+recent months (half-life six months, three after a drift, so an outdated pattern is
+forgotten faster); and the champion is chosen again each month on fresh backtests. An
+error above 1.5 times and 3 points over its promise is a drift, alerted in Grafana.
+
+**A negative result, kept.** Correcting the baseline by last month's error made it worse
+(14.5 % against 12.9 %): most monthly errors come from seasonal turns (back to school, the
+holidays) that do not carry over, so that error stays a model feature only. The two-week
+trend and last year's same month each helped (12.6 % and 12.5 %), hence the adjusted baseline.
+
+**Results.** Each of the 18 months from April 2025 was replayed with the new code: forecast
+again from the months before it only, then checked (Figure 5).
+
+| Error per borough and day | Seasonal baseline alone | Champion chosen each month |
+|---|---|---|
+| 18 months, April 2025 to September 2026 | 12.4 % | 12.2 % |
+| Last six months, April to September 2026 | 11.4 % | **9.2 %** |
+| Summer 2026, July to September | 15.1 % | **10.1 %** |
+
+The baseline was kept 10 times, the adjusted baseline chosen twice and LightGBM 6 times,
+all since March 2026, once a full year of history gave it last year's same month. Five of
+the first ten months drifted, on seasonal turns that four weeks of history cannot show;
+none has since February 2026. The choice has a cost: in August 2025 and February 2026 the
+adjusted baseline, better on its backtests, did worse on the month (16.7 % and 15.4 %
+against 13.4 % and 10.8 %). LightGBM made the October 2026 forecast.
+
+<figure class="compact"><img class="shot" src="figures/forecast_against_actual.png" alt="Forecast against actual, January to September 2026"><figcaption>Figure 5. Forecast against actual on the Forecast page: January 2026 (live check) drifted; every month since, replayed with the new code, came in as expected.</figcaption></figure>
+
+**The check found a platform bug.** From February 2026 the forecast kept targeting the same
+month: the dbt calendar ended on 31 January 2026, so later trips got the "Unknown" date and
+vanished from the published views while every test passed. The calendar now runs to 2027,
+and a new blocking test refuses a month in which a valid trip has no date; its first run
+still caught one, a January trip that started at 00:45 on 1 February. A month with no
+recorded trip is no longer checked (February had been, with an empty result).
 
 **Streaming.** A Kafka stream replays the current month trip by trip before its official
-file. A versioned contract rejects malformed messages to a dead-letter topic (74 in June,
-distances above 100,000 miles), the consumer writes each trip exactly once, and the rows
-stay provisional, in their own schema, never in a governed measure. The forecast page
-shows the month filling in against its forecast.
+file. A versioned contract sends malformed messages to a dead-letter topic (74 in June,
+distances above 100,000 miles); each trip is written once, provisional, never in a
+governed measure; the consumer's lag is alerted.
 
 ## 16. Results, limits and next steps
 
-The platform meets its five success measures: published data that passed every check, a
+The platform meets its success measures: published data that passed every check, a
 reconciled cleaned layer, dashboards that agree with the governed metrics, an assistant that
-never invents a figure, and runs that fail safely. Its main limits are stated, not hidden:
-trips are a proxy for demand; vendor-reported data has gaps; a language model can still
-misread a question, which is why its plan, figures and sources are always shown; the
-forecast lags sudden trends; the platform runs on one machine without backups.
+never invents a figure, and runs that fail safely. One target was missed, by the data, not
+the platform: the valid-trip rate of November 2025, explained and flagged. Limits: trips
+are a proxy for demand; vendor data has gaps; a language model can misread a question,
+hence its plan, figures and sources always shown; the forecast still lags sudden changes;
+one machine, without backups.
 
-Next steps: a trend correction for the forecast baseline, monitoring of the stream's
-consumer lag, and a managed object store and database for a multi-user deployment.
+Building it also showed that a green test suite is not enough: the calendar gap of
+section 15 passed every test and was found by the forecast check, a control on outcomes,
+not on structure. Next steps: weather and event data for the forecast, the stream fed by a
+live source instead of a replay, and a managed object store and database for a
+multi-user deployment.
 
 ## References
 

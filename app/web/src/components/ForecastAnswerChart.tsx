@@ -14,8 +14,9 @@ type Ink = (typeof INK)["light"];
 export default function ForecastAnswerChart({ answer, units, labels, month }: Props) {
   const ink = useIsDark() ? INK.dark : INK.light;
   const metric = answer.plan?.metrics[0] ?? "trips";
-  const unit = units[metric] ?? "trips";
-  const label = labels[metric] ?? metric.replace(/_/g, " ");
+  // How a past forecast did (forecast against actual): an error rate per borough.
+  const unit = metric === "forecast_error" ? "ratio" : (units[metric] ?? "trips");
+  const label = metric === "forecast_error" ? "Forecast error per borough and day" : (labels[metric] ?? metric.replace(/_/g, " "));
   const rows = answer.rows.map((r) => Object.fromEntries(answer.columns.map((c, i) => [c, r[i]])));
   const fmt = (n: number) => formatValue(n >= 100 ? Math.round(n) : Math.round(n * 10) / 10, unit);
   const tick = (v: number) => (unit.startsWith("USD") ? `$${compact(v)}` : compact(v));
@@ -36,7 +37,7 @@ export default function ForecastAnswerChart({ answer, units, labels, month }: Pr
     <BarList
       unit={unit}
       colors={ink}
-      title={`${label} expected, ${month}`}
+      title={metric === "forecast_error" ? `${label}, ${month}` : `${label} expected, ${month}`}
       rows={rows.map((r) => ({ key: String(r[first]), value: Number(r[metric]) }))}
     />
   );

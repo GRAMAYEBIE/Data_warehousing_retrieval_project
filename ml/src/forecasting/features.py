@@ -11,9 +11,30 @@ by changing that month and checking that no feature moves):
   against the 2 before; a 4-week trend was tried and made May worse, so it is not used);
 - its demand tier, from its level over 8 weeks (high, medium, low, sparse);
 - the calendar of the target hour: hour, weekday, weekend, public holiday, day of month,
-  days ahead of the origin.
+  days ahead of the origin;
+- what the forecast got wrong last month (learning from the gap): the seasonal baseline's
+  forecast of the previous month against what was recorded, per zone and per borough. It
+  is the quantity the monthly forecast-against-actual check measures (check.py), recomputed
+  here for every origin so that backtests can use it too, and known at the origin;
+- the same month a year earlier, once a year of history exists: the zone's weekday and
+  hour profile in that month, and how much that month differed from the four weeks before
+  it (the yearly seasonality, e.g. a summer slowdown). Missing before (NaN, which LightGBM
+  handles).
 
 Public holidays are left out of the profiles: a Christmas Day is not a typical Wednesday.
+
+The adjusted baseline (`adj_factor`, not a model feature) corrects the seasonal baseline
+per borough with the recent trend (last two weeks against the two before, half of it,
+within ±10 %) and the month's usual change from last year (within -20 % and +25 %). It
+competes with the plain baseline and the model (pipeline.py).
+
+Measured on the published months (forecasting --compare-baselines and an experiment on
+every month, error per borough and day): correcting the baseline by last month's error
+made it worse (14.5 % against 12.9 %): most monthly errors come from seasonal changes (the
+return to school in September, the holidays) that do not carry over to the next month, so
+last month's error is kept as a model feature only, where LightGBM learns when it matters.
+The two-week trend and last year's seasonality each improved the baseline (12.6 % and
+12.5 %; January 2026 from 20.7 % to 16.0 % with last year's January).
 """
 
 from __future__ import annotations
@@ -42,8 +63,16 @@ FEATURES = [
     "zone_hour_4w",
     "level_4w",
     "trend_2w",
+    "gap_last_zone",
+    "gap_last_borough",
+    "naive_ly",
+    "ly_ratio",
 ]
 CATEGORICAL = ["zone", "borough"]
+# Adjusted baseline: share of the two-week trend applied, and the bounds of each factor.
+TREND_DAMPING = 0.5
+TREND_BOUNDS = (0.90, 1.10)
+LY_BOUNDS = (0.80, 1.25)
 
 
 def tier_of(level: np.ndarray) -> np.ndarray:
@@ -70,6 +99,72 @@ def origin_index(history: History, origin: pd.Timestamp) -> int:
     return int((history.days < origin).sum())
 
 
+def _by_borough(values: np.ndarray, borough: np.ndarray) -> dict[str, float]:
+    return {b: float(values[borough == b].sum()) for b in np.unique(borough)}
+
+
+def last_month_gap(history: History, origin: pd.Timestamp) -> tuple[np.ndarray, np.ndarray]:
+    """(per zone, per zone's borough) relative error of the seasonal baseline's forecast of
+    the month before the origin: (forecast - recorded) / recorded; negative means the
+    forecast was too low. NaN when that month cannot be forecast from four weeks before it.
+    Only days before the origin are read."""
+    previous = (origin - pd.offsets.MonthBegin(1)).normalize()
+    p = origin_index(history, previous)
+    o = origin_index(history, origin)
+    n = len(history.zone_sk)
+    if p < 28 or o - p < 28:
+        return np.full(n, np.nan), np.full(n, np.nan)
+    profile = _weekday_profile(
+        history.trips[:, p - 28 : p, :], history.days[p - 28 : p], history.holidays
+    )
+    days = history.days[p:o]
+    forecast = profile[:, days.dayofweek.to_numpy(), :].sum(axis=(1, 2))
+    recorded = history.trips[:, p:o, :].sum(axis=(1, 2))
+    zone = (forecast - recorded) / (recorded + 24.0 * history.scale)  # small zones stay finite
+    f, r = _by_borough(forecast, history.borough), _by_borough(recorded, history.borough)
+    borough = np.array([(f[b] - r[b]) / r[b] if r[b] > 0 else np.nan for b in history.borough])
+    return zone, borough
+
+
+def last_year(
+    history: History, origin: pd.Timestamp, target_days: pd.DatetimeIndex
+) -> tuple[np.ndarray, np.ndarray]:
+    """(profile zone x weekday x hour of the same month a year earlier, per zone's borough
+    ratio of that month to the four weeks before it). NaN without a year of history."""
+    n = len(history.zone_sk)
+    ly_start = (origin - pd.DateOffset(years=1)).normalize()
+    ly_days = month_days(ly_start)
+    s = origin_index(history, ly_start)
+    if s < 28 or ly_days[-1] not in history.days or ly_days[-1] >= origin:
+        return np.full((n, 7, 24), np.nan), np.full(n, np.nan)
+    e = s + len(ly_days)
+    month = history.trips[:, s:e, :]
+    profile = _weekday_profile(month, history.days[s:e], history.holidays)
+    before = history.trips[:, s - 28 : s, :]
+    m = _by_borough(month.mean(axis=(1, 2)), history.borough)
+    b = _by_borough(before.mean(axis=(1, 2)), history.borough)
+    ratio = np.array([m[x] / b[x] if b[x] > 0 else np.nan for x in history.borough])
+    return profile, ratio
+
+
+def borough_trend(history: History, origin: pd.Timestamp) -> np.ndarray:
+    """Per zone's borough: trips of the last two weeks before the origin against the two
+    weeks before them (two whole weeks each, so weekdays balance out)."""
+    o = origin_index(history, origin)
+    recent = history.trips[:, o - 14 : o, :].sum(axis=(1, 2))
+    before = history.trips[:, o - 28 : o - 14, :].sum(axis=(1, 2))
+    r, b = _by_borough(recent, history.borough), _by_borough(before, history.borough)
+    return np.array([r[x] / b[x] if b[x] > 0 else np.nan for x in history.borough])
+
+
+def adjustment(trend: np.ndarray, ly_ratio: np.ndarray) -> np.ndarray:
+    """Per zone factor of the adjusted baseline: half of the recent borough trend and the
+    month's usual change from last year, each bounded; 1 where unknown."""
+    recent = np.where(np.isfinite(trend), 1 + TREND_DAMPING * (trend - 1), 1.0)
+    seasonal = np.where(np.isfinite(ly_ratio), ly_ratio, 1.0)
+    return np.clip(recent, *TREND_BOUNDS) * np.clip(seasonal, *LY_BOUNDS)
+
+
 def build(history: History, origin: pd.Timestamp, target_days: pd.DatetimeIndex) -> pd.DataFrame:
     """One row per zone x target day x hour, features only (see the module docstring)."""
     o = origin_index(history, origin)
@@ -92,6 +187,9 @@ def build(history: History, origin: pd.Timestamp, target_days: pd.DatetimeIndex)
     before = past[:, o - 28 : o - 14, :].mean(axis=(1, 2))
     trend_2w = (recent + 0.5) / (before + 0.5)
     tier = tier_of(w8.mean(axis=(1, 2)) / history.scale)  # tiers are in trips an hour
+    gap_zone, gap_borough = last_month_gap(history, origin)
+    naive_ly, ly_ratio = last_year(history, origin, target_days)
+    factor = adjustment(borough_trend(history, origin), ly_ratio)
 
     n_zones, n_days = len(history.zone_sk), len(target_days)
     z = np.repeat(np.arange(n_zones), n_days * 24)
@@ -116,6 +214,11 @@ def build(history: History, origin: pd.Timestamp, target_days: pd.DatetimeIndex)
             "zone_hour_4w": zone_hour_4w[z, h],
             "level_4w": level_4w[z],
             "trend_2w": trend_2w[z],
+            "gap_last_zone": gap_zone[z],
+            "gap_last_borough": gap_borough[z],
+            "naive_ly": naive_ly[z, weekday, h],
+            "ly_ratio": ly_ratio[z],
+            "adj_factor": factor[z],  # adjusted baseline, not a model feature
             "day_index": d,  # position in target_days, not a feature
         }
     )

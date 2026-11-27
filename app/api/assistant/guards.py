@@ -215,6 +215,59 @@ def swapped_months(narrative: str, columns: list[str], rows: list[list], period:
     return problems
 
 
+UNIT_AFTER = re.compile(r"^\s*(?:(trips?|rides?)\b|(%|percent)|(usd|dollars?)\b)", re.I)
+
+
+def wrong_units(
+    narrative: str, columns: list[str], rows: list[list], units: dict[str, str]
+) -> list[str]:
+    """A true number quoted with the wrong unit: "37.69 trips" when 37.69 is a percentage.
+
+    The number check cannot see it (37.69 is in the result). Each number written with a
+    unit ("... trips", "... %", "$..." or "... USD") must be a value of a column of that
+    unit when the result has one; it is wrong when it belongs only to another unit.
+    `units`: column -> unit of its measure ("trips", "USD", "ratio"...)."""
+    kinds: dict[str, list[float]] = {"count": [], "percent": [], "money": []}
+    for row in rows:
+        for column, cell in zip(columns, row, strict=True):
+            if isinstance(cell, bool) or not isinstance(cell, (int, float, Decimal)):
+                continue
+            value, unit = float(cell), units.get(column, "")
+            if column.endswith("_change_pct"):
+                kinds["percent"].append(value)
+            elif unit == "ratio":
+                kinds["percent"].append(value * 100)
+            elif unit == "trips":
+                kinds["count"].append(value)
+            elif unit.startswith("USD"):
+                kinds["money"].append(value)
+    problems = []
+    for match in NUMBER.finditer(narrative):
+        found = _numbers_in(match.group(0))
+        if not found:
+            continue
+        n = found[0]
+        after = UNIT_AFTER.match(narrative[match.end() : match.end() + 12])
+        before = narrative[max(0, match.start() - 2) : match.start()]
+        claimed = (
+            "percent"
+            if "%" in match.group(0) or (after and after.group(2))
+            else "money"
+            if "$" in before or (after and after.group(3))
+            else "count"
+            if after and after.group(1)
+            else None
+        )
+        if claimed is None or not kinds[claimed] or _matches(n, kinds[claimed]):
+            continue
+        others = [k for k in kinds if k != claimed and _matches(n, kinds[k])]
+        if others:
+            problems.append(
+                f"{match.group(0).strip()} written as {claimed}, but it is a {others[0]}"
+            )
+    return problems
+
+
 def format_value(value, unit: str) -> str:
     if value is None:
         return "no value"

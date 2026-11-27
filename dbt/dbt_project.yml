@@ -29,9 +29,11 @@ vars:
   # Airport zones: 1 Newark (EWR), 132 JFK, 138 LaGuardia. Airport rate codes: 2 JFK, 3 Newark.
   airport_zone_ids: [1, 132, 138]
   airport_rate_codes: [2, 3]
-  # Calendar covered by dim_date: the loaded months plus the cross-month tolerance.
+  # Calendar covered by dim_date: the loaded months plus the cross-month tolerance, and the
+  # months to come. A valid trip dated outside it fails assert_valid_trips_have_a_calendar_date
+  # (first set to January 2026: months loaded later lost their date until the test existed).
   calendar_start: "2024-11-01"
-  calendar_end: "2026-01-31"
+  calendar_end: "2027-12-31"
   # Optional list of source months to (re)process, e.g. --vars '{months: ["2025-01-01"]}'.
   # Empty: process every month whose latest loaded batch is not in silver yet.
   months: []

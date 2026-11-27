@@ -3,3 +3,7 @@ target-version = "py312"
 
 [lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[lint.per-file-ignores]
+# Markdown tables and reference descriptions: a line break would break the table.
+"data_dictionary.py" = ["E501"]

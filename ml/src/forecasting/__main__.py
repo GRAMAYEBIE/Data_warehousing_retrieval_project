@@ -60,7 +60,11 @@ def check_published(conn, history, target: str, uri: str | None, dry_run: bool) 
         if detail.empty:
             print(f"check {run['forecast_month']}: forecast rows no longer kept", flush=True)
             continue
-        result = check.compare(history, detail, daily, run["expected_wmape"])
+        try:
+            result = check.compare(history, detail, daily, run["expected_wmape"])
+        except check.NotRecorded as reason:
+            print(f"check {run['forecast_month']}: {reason}; left pending", flush=True)
+            continue
         print(describe(result), flush=True)
         if dry_run:
             continue
@@ -69,13 +73,26 @@ def check_published(conn, history, target: str, uri: str | None, dry_run: bool) 
             check.track(run["run_id"], result, uri)
 
 
+def memory(conn, target: str, month: str) -> float:
+    """LightGBM's memory for a forecast of `month`: shorter when one of the last two months
+    checked before it drifted (the recent months then weigh more)."""
+    from forecasting import check
+    from forecasting.model import half_life_for
+
+    statuses = check.recent_statuses(conn, target, month)
+    half_life = half_life_for(statuses)
+    print(f"last checks before {month}: {statuses or 'none'} -> half-life {half_life:g} months",
+          flush=True)  # fmt: skip
+    return half_life
+
+
 def replay(conn, history, target: str, month: str, uri: str | None, dry_run: bool) -> None:
     """Forecast `month` from the months before it only, as at the time, then check it."""
     from forecasting import check, store, tracking
 
     before = (pd.Timestamp(f"{month}-01") - pd.offsets.MonthBegin(1)).strftime("%Y-%m")
     past = check.history_until(history, before)
-    result = pipeline.run(past)
+    result = pipeline.run(past, memory(conn, target, month))
     if result.forecast_month != month:
         raise ValueError(f"replay of {month} forecast {result.forecast_month}")
     b = result.backtests
@@ -95,6 +112,33 @@ def replay(conn, history, target: str, month: str, uri: str | None, dry_run: boo
     check.save(conn, run_id, target, outcome, history.data_run, True, result.champion)
     if uri:
         check.track(run_id, outcome, uri)
+
+
+def compare_baselines(history) -> pd.DataFrame:
+    """Every month that can be forecast: error of the plain and of the adjusted baseline
+    (no training needed), per zone-hour and per borough-day. Shows whether learning from
+    last month's gap helps, month after month."""
+    from forecasting import evaluate
+    from forecasting.model import origins
+
+    rows = []
+    for start in origins(history):
+        frame = pipeline.naive_frame(history, start)
+        daily = frame.groupby(["borough", "date_day"])[["actual", "baseline", "adjusted"]].sum()
+        rows.append(
+            {
+                "month": start.strftime("%Y-%m"),
+                **{
+                    f"{m}_zone_hour": evaluate.wmape(frame.actual.to_numpy(), frame[m].to_numpy())
+                    for m in ("baseline", "adjusted")
+                },
+                **{
+                    f"{m}_borough_day": evaluate.wmape(daily.actual.to_numpy(), daily[m].to_numpy())
+                    for m in ("baseline", "adjusted")
+                },
+            }
+        )
+    return pd.DataFrame(rows)
 
 
 def describe(result) -> str:
@@ -119,9 +163,25 @@ def main(argv: list[str] | None = None) -> int:
         metavar="YYYY-MM",
         help="forecast these recorded months as at the time and check them (no live run)",
     )
+    parser.add_argument(
+        "--compare-baselines",
+        action="store_true",
+        help="error of the plain and adjusted baselines on every month (nothing written)",
+    )
     args = parser.parse_args(argv)
     targets = list(data.TARGETS) if args.target == "all" else [args.target]
     uri = os.environ.get("MLFLOW_TRACKING_URI")
+
+    if args.compare_baselines:
+        with connect() as conn:
+            for target in targets:
+                table = compare_baselines(data.load(conn, target))
+                with pd.option_context(
+                    "display.width", 160, "display.float_format", "{:.3f}".format
+                ):
+                    print(f"\n== {target}\n{table.to_string(index=False)}")
+                    print("mean:\n" + table.mean(numeric_only=True).to_string())
+        return 0
 
     with connect() as conn:
         for target in targets:
@@ -139,8 +199,9 @@ def main(argv: list[str] | None = None) -> int:
                 continue
             # 1. The forecast of a month now recorded is checked before it is replaced.
             check_published(conn, history, target, uri, args.dry_run)
-            # 2. The next month.
-            result = pipeline.run(history)
+            # 2. The next month, reacting to a recent drift found by the checks.
+            following = (pd.Timestamp(history.days[-1]) + pd.Timedelta(days=1)).strftime("%Y-%m")
+            result = pipeline.run(history, memory(conn, target, following))
             print(
                 f"{result.decision}\nchampion: {result.champion}, scored on "
                 f"{result.validated_month}; forecast for {result.forecast_month}\n"

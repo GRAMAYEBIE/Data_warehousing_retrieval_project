@@ -33,3 +33,8 @@ GRANT USAGE ON SCHEMA ml TO superset_reader, ai_reader;
 ALTER DEFAULT PRIVILEGES FOR ROLE forecaster IN SCHEMA ml
     GRANT SELECT ON TABLES TO superset_reader, ai_reader;
 GRANT SELECT ON ALL TABLES IN SCHEMA ml TO superset_reader, ai_reader;
+
+-- Monitoring reads the forecast-against-actual verdicts (alert ForecastDrift).
+GRANT USAGE ON SCHEMA ml TO metrics_reader;
+ALTER DEFAULT PRIVILEGES FOR ROLE forecaster IN SCHEMA ml GRANT SELECT ON TABLES TO metrics_reader;
+GRANT SELECT ON ALL TABLES IN SCHEMA ml TO metrics_reader;

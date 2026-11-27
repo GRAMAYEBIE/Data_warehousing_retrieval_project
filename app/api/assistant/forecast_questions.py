@@ -220,6 +220,94 @@ def is_follow_up(question: str) -> bool:
     )
 
 
+# "How accurate was the May forecast?": answered from the forecast-against-actual checks.
+ACCURACY_WORDS = re.compile(
+    r"\b(accura\w*|how (good|well|close|far off)|error|miss\w*|wrong|right|off by|drift)\b"
+)
+FORECAST_NOUNS = re.compile(r"\b(forecasts?|predict\w*|projections?|estimates?)\b")
+CHECK_SQL = """
+WITH latest AS (
+    SELECT DISTINCT ON (target, month) *
+    FROM ml.forecast_check_run
+    WHERE target = %(target)s
+    ORDER BY target, month, (actual_wmape IS NULL OR actual_wmape = 'NaN'), replay,
+             checked_at DESC
+)
+SELECT l.month, l.method, l.replay, l.status, l.expected_wmape::float AS expected,
+       s.segment AS pickup_borough, s.wmape::float AS forecast_error,
+       s.bias::float AS forecast_bias, s.coverage_80::float AS coverage,
+       s.predicted::float AS forecast, s.actual::float AS recorded
+FROM latest AS l JOIN ml.forecast_check AS s USING (run_id)
+WHERE s.segment_type = 'borough_day'
+  AND l.month = coalesce(%(month)s, (SELECT max(month) FROM latest))
+ORDER BY s.segment = 'all' DESC, s.wmape DESC
+LIMIT 12"""
+
+
+def wants_accuracy(question: str) -> bool:
+    text = question.lower()
+    return bool(ACCURACY_WORDS.search(text) and FORECAST_NOUNS.search(text))
+
+
+def accuracy_month(question: str) -> str | None:
+    """The month the question names ("May 2025", "2025-05", "May"), else None: the latest
+    month checked."""
+    named = named_period(question)
+    if named is not None and named.period == Period.custom:
+        return named.start_month
+    text = question.lower()
+    for name, number in (("january", 1), ("february", 2), ("march", 3), ("april", 4),
+                         ("may", 5), ("june", 6), ("july", 7), ("august", 8),
+                         ("september", 9), ("october", 10), ("november", 11),
+                         ("december", 12)):  # fmt: skip
+        if re.search(rf"\b{name}\b", text):
+            return f"%-{number:02d}"  # a month name alone: its latest year, resolved below
+    return None
+
+
+def accuracy(store, question: str, target: str) -> tuple[list[str], list[list], str, dict]:
+    """(columns, rows, narrative, run facts) of the check of the month asked; rows are the
+    boroughs, the first one the whole city."""
+    month = accuracy_month(question)
+    if month and month.startswith("%"):  # month name without a year: the latest such month
+        _, found, _ = store.query(
+            "SELECT max(month) FROM ml.forecast_check_run WHERE target = %(t)s "
+            "AND month LIKE %(m)s",
+            {"t": target, "m": month},
+        )
+        month = found[0][0] if found and found[0][0] else None
+    columns, rows, _ = store.query(CHECK_SQL, {"target": target, "month": month})
+    if not rows:
+        return [], [], "", {}
+    data = [dict(zip(columns, r, strict=True)) for r in rows]
+    city = next((d for d in data if d["pickup_borough"] == "all"), data[0])
+    worst = [d for d in data if d["pickup_borough"] != "all"][:3]
+    method = {"model": "the LightGBM model", "adjusted": "the adjusted baseline"}.get(
+        city["method"], "the seasonal baseline"
+    )
+    bias = city["forecast_bias"] or 0.0
+    text = (
+        f"The forecast of {_month(city['month'])} ({method}"
+        f"{', replayed as at the time' if city['replay'] else ''}) missed by "
+        f"{city['forecast_error'] * 100:.1f} % per borough and day, against "
+        f"{city['expected'] * 100:.1f} % promised by its backtests: "
+        f"{'flagged as drift' if city['status'] == 'drift' else 'as expected'}. Overall it was "
+        f"{abs(bias) * 100:.1f} % too {'low' if bias < 0 else 'high'}, and "
+        f"{city['coverage'] * 100:.0f} % of the borough-days fell inside its 80 % range. "
+        "Largest errors: "
+        + ", ".join(f"{d['pickup_borough']} ({d['forecast_error'] * 100:.1f} %)" for d in worst)
+        + "."
+    )
+    out_columns = ["pickup_borough", "forecast_error", "forecast_bias", "forecast", "recorded"]
+    out_rows = [
+        ["All boroughs" if d["pickup_borough"] == "all" else d["pickup_borough"],
+         round(d["forecast_error"], 4), round(d["forecast_bias"] or 0, 4),
+         round(d["forecast"]), round(d["recorded"])]
+        for d in data
+    ]  # fmt: skip
+    return out_columns, out_rows, text, {"month": city["month"], "sql": CHECK_SQL.strip()}
+
+
 def names_scope(ask: ForecastAsk) -> bool:
     """Does a follow-up name something to change? ("thanks" does not)."""
     return bool(ask.boroughs or ask.zones or ask.by or ask.hours or ask.day_type)
@@ -408,7 +496,10 @@ def narrative(ask: ForecastAsk, columns, rows, run: dict, accuracy: dict, unit: 
 
 def method_note(run: dict, accuracy: dict) -> str:
     """Which method made the forecast and how it did on the months before."""
-    method = "the LightGBM model" if run["champion"] == "model" else "the seasonal baseline"
+    method = {
+        "model": "the LightGBM model",
+        "adjusted": "the adjusted baseline (recent trend and last year's seasonality)",
+    }.get(run["champion"], "the seasonal baseline")
     text = f"Forecast made by {method}, the method in service"
     if accuracy.get("wmape") is not None:
         text += (

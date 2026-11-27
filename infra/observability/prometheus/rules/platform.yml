@@ -80,9 +80,26 @@ groups:
           summary: "Container {{ $labels.name }} restarted."
           action: "Logs board, filter on this container; PostgreSQL restarts were CPU starvation before."
       - alert: TargetDown
-        expr: up == 0
+        expr: up{optional!="true"} == 0  # optional profiles (stream) are not an outage
         for: 5m
         labels: {severity: warning, layer: observability}
         annotations:
           summary: "{{ $labels.job }} is not answering (layer {{ $labels.layer }})."
           action: "Is its profile started? docker compose ps"
+
+  - name: forecast_and_stream
+    rules:
+      - alert: ForecastDrift
+        expr: nyc_forecast_check_drift == 1
+        for: 5m
+        labels: {severity: warning, layer: ml}
+        annotations:
+          summary: "The {{ $labels.target }} forecast of {{ $labels.month }} drifted: error well above what its backtests promised."
+          action: "Forecast page, forecast against actual: which boroughs? The next training already weighs recent months more."
+      - alert: KafkaConsumerLag
+        expr: sum by (consumergroup) (kafka_consumergroup_lag{consumergroup="stream-to-postgres"}) > 100000
+        for: 10m
+        labels: {severity: warning, layer: stream}
+        annotations:
+          summary: "The stream consumer is {{ $value | humanize }} messages behind."
+          action: "docker compose logs stream-consumer: is PostgreSQL slow or the consumer stopped?"

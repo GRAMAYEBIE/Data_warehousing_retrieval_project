@@ -60,11 +60,11 @@ Dashboard 5); a missed target is investigated before the next month is published
 
 | Area | Measure and target | How it is measured · result so far |
 |---|---|---|
-| **Data freshness** | A month is published **the day its file is detected**: **≤ 1 h** from the source check to publication; the data age is shown on every dashboard and answer | Airflow run times and the data-age metric in Grafana · about 20 min per monthly run |
-| **Data quality** | Valid-trip rate **≥ 85 %** per month; **0** rows unexplained between raw and cleaned data; **0** failed blocking test before publication | Reconciliation table and dbt tests at every run · 90 % to 94 % per month; every row explained; publication refused when a test fails |
+| **Data freshness** | A month is published **the day its file is detected**: **≤ 1 h** from the source check to publication; the data age is shown on every dashboard and answer | Airflow run times and the data-age metric in Grafana · median 20 min per monthly run (26 runs, longest 34 min) |
+| **Data quality** | Valid-trip rate **≥ 85 %** per month; **0** rows unexplained between raw and cleaned data; **0** failed blocking test before publication | Reconciliation table and dbt tests at every run · 83.6 % to 94.1 % over 22 months: missed once, November 2025, when one vendor reported negative amounts on 12 % of its trips; every row of 86 million explained; publication refused when a test fails |
 | **Dashboard usefulness** | Every chart answers a named business question and each dashboard ends with a "so what" insight; **100 %** of charts return data; the same metric gives the **same value** in every tool | Automatic check of every chart; parity test across tools · 6 dashboards, all charts returning data; 40 of 40 metric checks identical |
 | **AI answer trustworthiness** | **100 %** of figures in an answer come from an approved query; **≥ 90 %** of the evaluation cases pass; **0** model-written SQL executed | Evaluation pack (20 cases) and audit log of every answer · 20 of 20 pass; a text quoting a figure not in the result is replaced automatically |
-| **Delivery reliability** | **≥ 95 %** of monthly runs succeed without manual action; a failed run **never** changes published data; services restart on their own | Airflow run history · every month loaded in order without intervention; a deliberately failed run left published data unchanged |
+| **Delivery reliability** | **≥ 95 %** of monthly runs succeed without manual action; a failed run **never** changes published data; services restart on their own | Airflow run history · 26 of 26 runs succeeded on the lab machine, every month loaded in order without intervention; a deliberately failed run left published data unchanged |
 | *Forecast (extension)* | Error per borough and day at or below what its backtests promised | Monthly forecast-against-actual check · June 2025: 6.0 % against 7.9 % promised |
 
 ## 4. Risks and limits that need human review

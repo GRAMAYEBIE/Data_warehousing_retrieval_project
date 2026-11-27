@@ -987,3 +987,71 @@ def test_a_narrative_with_swapped_months_is_replaced_by_the_factual_summary():
     answer = a.ask("Trips in February 2025 compared with January 2025")
     assert answer.status == "answered" and answer.narrative_check == "replaced"
     assert any("months swapped" in r for r in answer.reasons)
+
+
+def test_a_figure_written_with_the_wrong_unit_is_caught():
+    from assistant.guards import wrong_units
+
+    columns = ["pickup_borough", "trips_previous", "trips_current", "trips_change",
+               "trips_change_pct"]  # fmt: skip
+    rows = [["Staten Island", 81, 112, 31, 37.69], ["Brooklyn", 88_960, 123_995, 35_035, 39.38]]
+    units = {c: "trips" for c in columns[1:4]}
+    # Observed on the lab machine: a percentage written as trips.
+    wrong = "Staten Island had the smallest increase at 37.69 trips, or a 37.69% rise."
+    assert wrong_units(wrong, columns, rows, units) == [
+        "37.69 written as count, but it is a percent"
+    ]
+    right = "Brooklyn gained 35,035 trips (39.38 %), Staten Island 31 trips (37.69 %)."
+    assert wrong_units(right, columns, rows, units) == []
+    revenue = ["total_revenue", "valid_trip_rate"]
+    assert wrong_units("Revenue was $99.7 million.", revenue, [[99_700_000, 0.91]],
+                       {"total_revenue": "USD", "valid_trip_rate": "ratio"}) == []  # fmt: skip
+    assert wrong_units("91 trips were valid.", revenue, [[99_700_000, 0.91]],
+                       {"total_revenue": "USD", "valid_trip_rate": "ratio"}) == []  # fmt: skip
+
+
+def test_how_accurate_was_a_forecast_is_answered_from_the_checks():
+    from assistant import forecast_questions as fq
+
+    assert fq.wants_accuracy("How accurate was the May forecast?")
+    assert fq.wants_accuracy("How far off was the prediction for June 2025?")
+    assert not fq.wants_accuracy("How many trips are expected next month?")
+    assert fq.accuracy_month("How accurate was the forecast for 2025-05?") == "2025-05"
+    assert fq.accuracy_month("How accurate was the May forecast?") == "%-05"
+
+    class CheckStore(FakeStore):
+        def query(self, sql, params):
+            if "max(month)" in sql and "LIKE" in sql:
+                assert params["m"] == "%-05"
+                return ["max"], [("2025-05",)], 1
+            assert params == {"target": "trips", "month": "2025-05"} and "LIMIT" in sql
+            columns = [
+                "month",
+                "method",
+                "replay",
+                "status",
+                "expected",
+                "pickup_borough",
+                "forecast_error",
+                "forecast_bias",
+                "coverage",
+                "forecast",
+                "recorded",
+            ]
+            head = ("2025-05", "baseline", True, "drift", 0.06)
+            return (
+                columns,
+                [
+                    (*head, "all", 0.117, -0.066, 0.76, 3.7e6, 4.0e6),
+                    (*head, "Brooklyn", 0.248, -0.239, 0.87, 9e4, 1.2e5),
+                ],
+                2,
+            )
+
+    a = assistant(store=CheckStore())
+    answer = a.ask("How accurate was the May forecast?")
+    assert answer.status == "answered" and a.llm.calls == 0
+    assert answer.rows[0][:3] == ["All boroughs", 0.117, -0.066]
+    assert "missed by 11.7 % per borough and day, against 6.0 %" in answer.narrative
+    assert "flagged as drift" in answer.narrative and "6.6 % too low" in answer.narrative
+    assert answer.provenance.data_layer.startswith("ml (forecast against actual")

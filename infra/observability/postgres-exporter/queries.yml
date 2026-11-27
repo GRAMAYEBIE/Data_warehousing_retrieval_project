@@ -110,3 +110,20 @@ nyc_ai_audit:
     - verdict: {usage: LABEL, description: Verdict of the assistant}
     - answers_24h: {usage: GAUGE, description: Answers in the last 24 hours}
     - median_seconds_24h: {usage: GAUGE, description: Median answer time in the last 24 hours}
+
+# The latest forecast-against-actual check per target (ml/check.py): the live check of the
+# month when it exists, else its replay. drift = 1 raises the ForecastDrift alert.
+nyc_forecast_check:
+  query: |
+    SELECT DISTINCT ON (target) target, month, status, (status = 'drift')::int AS drift,
+           actual_wmape::float AS error, expected_wmape::float AS expected_error
+    FROM ml.forecast_check_run
+    WHERE actual_wmape IS NOT NULL AND actual_wmape <> 'NaN'
+    ORDER BY target, month DESC, replay, checked_at DESC
+  metrics:
+    - target: {usage: LABEL, description: Forecast target (trips or revenue)}
+    - month: {usage: LABEL, description: Month checked}
+    - status: {usage: LABEL, description: ok or drift}
+    - drift: {usage: GAUGE, description: 1 when the latest month checked drifted}
+    - error: {usage: GAUGE, description: Observed error per borough and day (WMAPE)}
+    - expected_error: {usage: GAUGE, description: Error promised by the backtests}

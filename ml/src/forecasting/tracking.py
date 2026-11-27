@@ -80,6 +80,7 @@ def log(
             {
                 **{f"lgbm.{k}": v for k, v in PARAMS.items()},
                 "rounds": result.rounds,
+                "half_life_months": result.half_life,  # recency of training weights
                 "quantiles": ",".join(f"{k}={v}" for k, v in QUANTILES.items()),
                 "features": ",".join(FEATURES),
                 "train_origins": ",".join(result.train_months),

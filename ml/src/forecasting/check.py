@@ -118,6 +118,10 @@ def recorded(history: History, forecast: pd.DataFrame) -> np.ndarray:
     return np.where(zone >= 0, values, 0.0)
 
 
+class NotRecorded(ValueError):
+    """The forecast month has no recorded trip yet: nothing to check it against."""
+
+
 def status_of(actual_wmape: float, expected_wmape: float | None) -> str:
     if expected_wmape is None or not np.isfinite(expected_wmape):
         return "ok"
@@ -134,6 +138,10 @@ def compare(
     predicted, lower, upper); daily: borough x day (predicted, lower, upper)."""
     frame = forecast.copy()
     frame["actual"] = recorded(history, frame)
+    if not frame["actual"].sum() > 0:
+        # Observed: during the calendar gap of 2026 a month was loaded but had no dated trip
+        # in the published views; checking it stored an error of NaN judged "ok".
+        raise NotRecorded("no trip recorded for the forecast month in the published views")
     frame["baseline"] = frame["predicted"]  # report() needs it; not shown for a check
     report = evaluate.report(frame)
     totals = {
@@ -170,15 +178,24 @@ def compare(
 
 
 # ------------------------------------------------------------------ database
+# Which check stands for a month when it has several: a measured one first (a check stored
+# with an error of NaN, before NotRecorded existed, measured nothing), then the live one,
+# then the latest. The same order is used by the API and the drift alert.
+MEASURED_FIRST = "(actual_wmape IS NULL OR actual_wmape = 'NaN'), replay, checked_at DESC"
+
+# The latest published forecast of each recorded month not checked live yet: one check per
+# month, even when the month was forecast several times (re-runs of the same publication).
 PENDING_SQL = """
-SELECT r.run_id, r.forecast_month, r.champion,
+SELECT DISTINCT ON (r.forecast_month) r.run_id, r.forecast_month, r.champion,
        (SELECT avg(b.wmape)::float FROM ml.forecast_backtest AS b
         WHERE b.run_id = r.run_id AND b.method = r.champion
           AND b.segment_type = 'borough_day' AND b.segment = 'all') AS expected_wmape
 FROM ml.forecast_run AS r
-WHERE r.published AND r.target = %(target)s AND r.forecast_month = ANY(%(months)s)
-  AND NOT EXISTS (SELECT 1 FROM ml.forecast_check_run AS c WHERE c.run_id = r.run_id)
-ORDER BY r.created_at
+WHERE r.published AND NOT r.replay AND r.target = %(target)s
+  AND r.forecast_month = ANY(%(months)s)
+  AND NOT EXISTS (SELECT 1 FROM ml.forecast_check_run AS c
+                  WHERE c.target = r.target AND c.month = r.forecast_month AND NOT c.replay)
+ORDER BY r.forecast_month, r.created_at DESC
 """
 
 
@@ -191,6 +208,21 @@ def pending(conn, target: str, months: list[str]) -> list[dict]:
         out = [dict(zip(columns, row, strict=True)) for row in cur.fetchall()]
     conn.commit()
     return out
+
+
+def recent_statuses(conn, target: str, before: str, count: int = 2) -> list[str]:
+    """Verdicts of the last `count` months checked before `before` ("YYYY-MM"), the live
+    check when a month has both: the next training reacts to a recent drift."""
+    with conn.cursor() as cur:
+        cur.execute(CHECK_DDL)
+        cur.execute(
+            f"""SELECT DISTINCT ON (month) month, status FROM ml.forecast_check_run
+               WHERE target = %s AND month < %s ORDER BY month DESC, {MEASURED_FIRST}""",
+            (target, before),
+        )
+        rows = cur.fetchall()[:count]
+    conn.commit()
+    return [status for _, status in rows]
 
 
 def published_forecast(conn, run_id: str, target: str) -> tuple[pd.DataFrame, pd.DataFrame]:

@@ -93,7 +93,7 @@ export default function ForecastView() {
   const cityDay = score("borough_day", "all");
   const overall = score("overall", "all");
   const backtests = rowsOf(data.tables.backtests) as Backtest[];
-  const champion = run.champion === "model" ? "model" : "baseline";
+  const champion = METHOD_ORDER.includes(run.champion) ? run.champion : "baseline";
   const championDays = backtests.filter((b) => b.method === champion && b.segment_type === "borough_day" && b.segment === "all");
   const meanDay = championDays.length ? championDays.reduce((s, b) => s + Number(b.wmape), 0) / championDays.length : null;
   const zones = rowsOf(data.tables.zones);
@@ -323,7 +323,15 @@ function DayTip({ active, payload, usd }: TooltipProps<number, string> & { usd: 
 
 type Backtest = { month: string; method: string; segment_type: string; segment: string; rows: number; wmape: number; bias: number };
 
-const METHOD_NAME: Record<string, string> = { baseline: "Baseline", model: "Model" };
+// The plain baseline (the incumbent), the baseline that learns from last month's gap, and
+// LightGBM. Forecasts made before the adjusted baseline existed have two methods only.
+const METHOD_ORDER = ["baseline", "adjusted", "model"];
+const METHOD_NAME: Record<string, string> = { baseline: "Baseline", adjusted: "Adjusted", model: "Model" };
+const METHOD_LONG: Record<string, string> = {
+  baseline: "the seasonal baseline",
+  adjusted: "the adjusted baseline",
+  model: "the LightGBM model",
+};
 
 // The champion is the method in service; the bars and the table say which one won where.
 function Accuracy({ backtests, champion, days }: { backtests: Backtest[]; champion: string; days: number }) {
@@ -331,7 +339,14 @@ function Accuracy({ backtests, champion, days }: { backtests: Backtest[]; champi
     backtests.find((b) => b.month === month && b.method === method && b.segment_type === type && b.segment === segment);
   const months = [...new Set(backtests.map((b) => b.month))].sort();
   const last = months[months.length - 1] ?? "";
-  const challenger = champion === "model" ? "baseline" : "model";
+  const methods = METHOD_ORDER.filter((m) => backtests.some((b) => b.method === m));
+  // Compared with the champion: the baseline, or when the baseline is in service, the best challenger.
+  const challenger =
+    champion !== "baseline"
+      ? "baseline"
+      : methods
+          .filter((m) => m !== "baseline")
+          .sort((a, b) => Number(get(last, a, "overall", "all")?.wmape ?? 9) - Number(get(last, b, "overall", "all")?.wmape ?? 9))[0] ?? "model";
   const boroughs = [...new Set(backtests.filter((b) => b.segment_type === "borough_day" && b.segment !== "all").map((b) => b.segment))]
     .map((name) => ({ name, champ: get(last, champion, "borough_day", name), chall: get(last, challenger, "borough_day", name) }))
     .sort((a, b) => Number(a.champ?.wmape ?? 9) - Number(b.champ?.wmape ?? 9));
@@ -343,21 +358,26 @@ function Accuracy({ backtests, champion, days }: { backtests: Backtest[]; champi
         <thead>
           <tr className="text-left text-xs text-ink-3">
             <th className="pb-1.5 font-medium">Month tested</th>
-            <th className="pb-1.5 pl-3 text-right font-medium">Baseline</th>
-            <th className="pb-1.5 pl-3 text-right font-medium">Model</th>
+            {methods.map((method) => (
+              <th key={method} className="pb-1.5 pl-3 text-right font-medium">
+                {METHOD_NAME[method]}
+              </th>
+            ))}
             <th className="pb-1.5 pl-3 text-right font-medium">Winner</th>
           </tr>
         </thead>
         <tbody>
           {months.map((m) => {
-            const base = Number(get(m, "baseline", "overall", "all")?.wmape);
-            const model = Number(get(m, "model", "overall", "all")?.wmape);
-            const winner = model < base ? "model" : "baseline";
+            const errors = Object.fromEntries(methods.map((method) => [method, Number(get(m, method, "overall", "all")?.wmape)]));
+            const winner = methods.reduce((a, b) => (errors[b] < errors[a] ? b : a), methods[0]);
             return (
               <tr key={m} className="border-t border-line">
                 <td className="py-1.5 text-ink-2">{monthLabel(m)}</td>
-                <td className={`${cell} ${winner === "baseline" ? "font-semibold text-ink" : "text-ink-3"}`}>{pct(base)}</td>
-                <td className={`${cell} ${winner === "model" ? "font-semibold text-ink" : "text-ink-3"}`}>{pct(model)}</td>
+                {methods.map((method) => (
+                  <td key={method} className={`${cell} ${winner === method ? "font-semibold text-ink" : "text-ink-3"}`}>
+                    {pct(errors[method])}
+                  </td>
+                ))}
                 <td className="py-1.5 pl-3 text-right">
                   <span className={`chip ${winner === champion ? "border-primary/30 bg-primary/10 text-primary-strong" : "border-line bg-tint text-ink-2"}`}>
                     {METHOD_NAME[winner]}
@@ -368,7 +388,10 @@ function Accuracy({ backtests, champion, days }: { backtests: Backtest[]; champi
           })}
         </tbody>
       </table>
-      <p className="-mt-3 text-xs leading-5 text-ink-3">Error per zone and hour. The model is promoted when it wins most months, on average, and on the busy zones.</p>
+      <p className="-mt-3 text-xs leading-5 text-ink-3">
+        Error per zone and hour. A challenger replaces the baseline when it wins most months, on average, and on the busy zones. The
+        adjusted baseline follows the recent two-week trend and the month's usual change from last year.
+      </p>
 
       <div>
         <h3 className="mb-2 text-sm font-semibold">Per borough and day, {monthLabel(last)}</h3>
@@ -399,14 +422,16 @@ function Accuracy({ backtests, champion, days }: { backtests: Backtest[]; champi
           <thead>
             <tr className="text-left text-xs text-ink-3">
               <th className="pb-1.5 font-medium">Zones</th>
-              <th className="pb-1.5 pl-3 text-right font-medium">Baseline</th>
-              <th className="pb-1.5 pl-3 text-right font-medium">Model</th>
+              {methods.map((method) => (
+                <th key={method} className="pb-1.5 pl-3 text-right font-medium">
+                  {METHOD_NAME[method]}
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody>
             {["high", "medium", "low", "sparse"].map((tier) => {
               const base = get(last, "baseline", "tier", tier);
-              const model = get(last, "model", "tier", tier);
               if (!base) return null;
               return (
                 <tr key={tier} className="border-t border-line">
@@ -415,8 +440,11 @@ function Accuracy({ backtests, champion, days }: { backtests: Backtest[]; champi
                     <span className="num text-ink-3"> · {Math.round(Number(base.rows) / (days * 24))} zones</span>
                     {tier === "sparse" && <span className="chip ml-2 border-accent/40 bg-accent/15 text-ink">low confidence</span>}
                   </td>
-                  <td className={`${cell} ${champion === "baseline" ? "font-medium" : "text-ink-3"}`}>{pct(base.wmape, 0)}</td>
-                  <td className={`${cell} ${champion === "model" ? "font-medium" : "text-ink-3"}`}>{pct(model?.wmape, 0)}</td>
+                  {methods.map((method) => (
+                    <td key={method} className={`${cell} ${champion === method ? "font-medium" : "text-ink-3"}`}>
+                      {pct(get(last, method, "tier", tier)?.wmape, 0)}
+                    </td>
+                  ))}
                 </tr>
               );
             })}
@@ -431,6 +459,15 @@ function Accuracy({ backtests, champion, days }: { backtests: Backtest[]; champi
   );
 }
 
+const DECISION_TEXT: Record<string, string> = {
+  baseline:
+    "Same weekday and hour, averaged over the last four weeks. Two challengers are retrained and tested every month: the adjusted baseline (recent trend and last year's seasonality) and LightGBM, which learns from past forecast errors; one takes over when it wins.",
+  adjusted:
+    "The seasonal baseline corrected by the recent two-week trend and the month's usual change from last year. It replaced the plain baseline by winning most test months.",
+  model:
+    "LightGBM, retrained every month on every published month, with last month's forecast error and the same month a year earlier among its features. It beat the baseline in most test months.",
+};
+
 function Decision({ champion, decision }: { champion: string; decision?: string | null }) {
   return (
     <section className="card flex flex-wrap items-start gap-4 px-5 py-4" aria-label="Method in service">
@@ -438,14 +475,10 @@ function Decision({ champion, decision }: { champion: string; decision?: string 
         <Trophy size={19} aria-hidden="true" />
       </span>
       <div className="min-w-[220px] flex-1">
-        <div className="text-sm font-semibold">
-          Method in service: {champion === "model" ? "the LightGBM model" : "the seasonal baseline"}
-        </div>
+        <div className="text-sm font-semibold">Method in service: {METHOD_LONG[champion] ?? METHOD_LONG.baseline}</div>
         <p className="mt-0.5 text-xs leading-5 text-ink-3">
-          {champion === "model"
-            ? "The model beat the baseline in most of the last test months; the baseline is kept as the reference to beat."
-            : "Same weekday and hour, averaged over the last four weeks. The LightGBM model is trained and tested every month as the challenger and takes over when it wins."}
-          {decision && <span className="block text-ink-2">{decision.replace(/^(model promoted|baseline kept in service): /, "Last decision: ")}.</span>}
+          {DECISION_TEXT[champion] ?? DECISION_TEXT.baseline}
+          {decision && <span className="block text-ink-2">{decision.replace(/^[a-zA-Z ]+(promoted|kept in service): /, "Last decision: ")}.</span>}
         </p>
       </div>
     </section>
@@ -501,7 +534,8 @@ function Hourly({ table, ink }: { table?: Table; ink: Ink }) {
 function Method({ validated, runId, rounds }: { validated: string; runId: string; rounds: number }) {
   const items: [string, string][] = [
     ["Tested on unseen months", `Each of the last three months, up to ${validated}, is forecast from the weeks before it, the model trained on earlier months only. Never a random split.`],
-    ["Champion and challenger", "The seasonal baseline and the LightGBM model compete every month. The model is used only when it wins most of those months; otherwise it keeps training as the challenger."],
+    ["Champion and challengers", "The seasonal baseline, the adjusted baseline and LightGBM compete every month. A challenger is used only when it wins most of those months; otherwise it keeps training."],
+    ["Learning from its errors", "Each month the forecast is checked against what happened. LightGBM is retrained on every month's errors and uses last month's gap as a feature; the champion is chosen on measured errors only."],
     ["Imbalance taken into account", "Errors are measured per borough and per demand level, weighted by trips, so the busy Manhattan zones cannot hide the rest."],
     ["What it predicts", "Recorded trips, not total need: a ride that could not find a taxi leaves no trace in the data."],
   ];

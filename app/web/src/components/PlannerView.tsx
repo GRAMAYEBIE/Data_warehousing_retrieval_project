@@ -445,7 +445,7 @@ function Reading({ champion }: { champion?: string | null }) {
     ],
     [
       "Expected, then recorded",
-      `The expected figures come from the published forecast (${champion === "model" ? "the LightGBM model" : "the seasonal baseline"}, the method in service). The range below each zone is what was actually recorded over the last eight weeks, empty days included.`,
+      `The expected figures come from the published forecast (${{ model: "the LightGBM model", adjusted: "the adjusted baseline" }[champion ?? ""] ?? "the seasonal baseline"}, the method in service). The range below each zone is what was actually recorded over the last eight weeks, empty days included.`,
     ],
     [
       "Only paid ride time",

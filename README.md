@@ -8,9 +8,9 @@ Final project for **DS6102 Data Warehousing and Information Retrieval** (Academi
 - Full exam paper: `docs/exam/DS6102_sujet.pdf`
 
   
-This document is the project reference: what is built, how to run it, and the design
-decisions for the parts still to build. Sections marked **(planned)** describe a design
-that is not implemented yet.
+This document is the project reference: what is built, how to run it, the design decisions
+and the results measured on the real data. The project report (`docs/report.pdf`) answers
+the exam questions one by one and points back here for the details.
 
 ---
 
@@ -21,15 +21,17 @@ that is not implemented yet.
 | 1 | Docker Compose core, warehouse schemas and roles, landing zone, idempotent ingestion, bronze layer, manifest | **Built and verified** |
 | 2 | dbt: silver, quality flags, star schema, aggregates, tests, reconciliation | **Built and verified** (94/94 build steps green on two months) |
 | 3 | Airflow orchestration, publication gate, operational signals | **Built and verified** (successful run, failure and recovery, safe re-run) |
-| 4 | Semantic layer, Superset, six dashboards | **Built and verified**: semantic layer, metric parity 40/40 on three surfaces (MetricFlow, published SQL, Superset), 10 certified datasets, 6 dashboards (55 charts, each verified to return data) |
+| 4 | Semantic layer, Superset, six dashboards | **Built and verified**: semantic layer, metric parity 40/40 on three surfaces (MetricFlow, published SQL, Superset), 10 certified datasets, 6 dashboards (57 charts, each verified to return data) |
 | 5 | AI assistant: API, web interface, evaluation pack | **Built and verified**: governed planner, validator, approved templates, number checks (86 API tests); conversational answers streamed from a local model (`qwen2.5:7b`); React interface (Overview, Forecast, Shift planner, Ask, Report builder), voice input; evaluation pack |
-| 6 | Observability: metrics, logs, traces, alerts (Prometheus, Loki, Tempo, Grafana) | **Built and verified**: 12 services, 6 dashboards and 12 alert rules as code; a question gives a trace and a log line with the same trace id |
-| 7 | MLflow and demand forecasting (needs six months) | **Built and verified**: trips and revenue per zone and hour, seasonal baseline and LightGBM compete on rolling backtests, forecast against actual checked every month with drift flagged ([section 12](#demand-forecast-wave-7-profile-ml)) |
+| 6 | Observability: metrics, logs, traces, alerts (Prometheus, Loki, Tempo, Grafana) | **Built and verified**: 12 services, 6 dashboards and 14 alert rules as code; a question gives a trace and a log line with the same trace id |
+| 7 | MLflow and demand forecasting (needs six months) | **Built and verified**: trips and revenue per zone and hour; a seasonal baseline, an adjusted baseline and LightGBM compete on rolling backtests; every month is checked against what happened, drift is flagged and the next training reacts to it ([section 12](#demand-forecast-wave-7-profile-ml)) |
 | 8 | Kafka: provisional stream of the current month | **Built and verified**: June 2025 replayed through Kafka (4,322,960 trips, 74 rejected by the contract), watched live against its forecast ([section 12](#streaming-wave-8-profile-stream)) |
 
-Loaded and published: six months, `2024-12` to `2025-05` (publication `load_2025_05`), plus
-the 265 taxi zones. Valid-trip rate per month between 90 % and 94 %. June 2025 is streamed
-as provisional data, not published yet.
+Loaded and published: **22 months, `2024-12` to `2026-09`** (the latest TLC file in
+November 2026), one Airflow run each, in order, plus the 265 taxi zones. The platform was
+built on the first six months; June 2025 was streamed through Kafka before its official
+load; each later month checked the forecast made for it. Documents: `docs/proposal.pdf`
+(Q1), `docs/report.pdf` (project report), `docs/data_dictionary.md`, `docs/diagrams/`.
 
 ---
 
@@ -225,8 +227,9 @@ all 4, the kernel log showed "soft lockup" warnings (a CPU starved for more than
 PostgreSQL backends were killed; leaving one CPU to Windows stopped it. PostgreSQL runs
 without parallel workers or JIT, and the pipeline runs one task at a time
 (`PIPELINE_MAX_ACTIVE_TASKS=1`). On a larger machine, raise all of them.
-A demonstration mode (`DEMO_MODE=true`) will limit the platform to one month and a small
-LLM (`qwen2.5:3b`).
+For a quick demonstration on a small machine, load a single month (`make ingest
+MONTH=2025-01`, then `make run-month MONTH=2025-01`) and use the smaller model
+`qwen2.5:3b`; six months are needed for the forecast.
 
 ---
 
@@ -235,7 +238,7 @@ LLM (`qwen2.5:3b`).
 ```
 SOURCES                    LANDING (RustFS S3)            ORCHESTRATION
 TLC Yellow Parquet   ──►   raw/yellow/year=/month=/  ◄──  Airflow 3 + Cosmos
- (2024-12 → 2025-12)       manifests/                     monthly DAG, targets M-2
+ (2024-12 → 2026-09)       manifests/                     monthly DAG, targets M-2
 Zone lookup + shapefile    quarantine/                    max_active_runs=1
 US/NY public holidays
                                   │ COPY
@@ -257,11 +260,17 @@ POSTGRESQL 16 — database `warehouse` ─────────────�
 ─────────────────────────────────────────────────────────────────────────
         │ superset_reader                    │ ai_reader (read-only, 10 s)
         ▼                                    ▼
-  Superset + Redis                    FastAPI ──► Ollama (qwen2.5)
+  Superset + Redis                    FastAPI ──► Ollama (qwen2.5:7b)
   6 certified dashboards                 │  └──► Superset REST API (drafts)
                                          ▼
-                                  React UI (Vite)   [plan B: Streamlit]
+                                  React UI (Vite)
+
+  Extensions: ml (MLflow, forecasts, forecast against actual) · stream (Kafka, provisional
+  trips of the current month) · observability (Prometheus, Grafana, Loki, Tempo)
 ```
+
+The same architecture is drawn in `docs/diagrams/architecture.svg`, and the star schema in
+`docs/diagrams/star_schema.svg`.
 
 One PostgreSQL server holds three separate databases: `warehouse` (business data),
 `airflow_meta` and `superset_meta` (internal state of the tools).
@@ -297,13 +306,13 @@ Every step runs in the Airflow DAG.
 | **Additive aggregates only** | Aggregate tables store sums and counts; averages and ratios are computed at read time. An average of averages is wrong. |
 | **Each metric formula is written once** | In the `meta:` block of the dbt YAML. Superset and the AI assistant copy it through `metrics-sync`. This makes the Q6 consistency check verifiable. |
 | **The AI only uses templates on `analytics`** | `ai_reader` has no right on gold. MetricFlow (which reads `fct_trip`) is the "dbt" surface of the consistency check, not the engine of the assistant. |
-| **RustFS instead of MinIO** | The exam allows an equivalent S3-compatible store with a written justification (status of MinIO Community edition). The justification must be sourced before the final submission. Image pinned to `rustfs/rustfs:1.0.6`. |
-| **React (Vite) front end, not Next.js** | Vite + TypeScript + Tailwind + TanStack Query + Recharts. Types generated from the FastAPI OpenAPI schema. **Plan B: Streamlit on the same API** if the front end is not ready at the end of day 12 (27 November). |
+| **RustFS instead of MinIO** | The exam allows an equivalent S3-compatible store with a written justification. The MinIO community edition stopped publishing binaries and container images in October 2025, went into maintenance mode in December 2025, and its repository was archived (read-only) on 25 April 2026 (github.com/minio/minio; itsfoss.com/news/minio-moves-away-from-open-source). A platform meant to be run again needs a maintained image. Image pinned to `rustfs/rustfs:1.0.6`. |
+| **React (Vite) front end, not Next.js** | Vite + TypeScript + Tailwind + TanStack Query + Recharts. Types generated from the FastAPI OpenAPI schema. |
 | **No DuckDB** | PostgreSQL is the required warehouse; a second engine would be a competing source of truth. |
-| **Metric catalogue in the prompt, no RAG** | About 15 metrics fit in the prompt; the exam asks for a "compact semantic catalogue". |
+| **Metric catalogue in the prompt, targeted retrieval** | About 15 metrics fit in the prompt; the exam asks for a "compact semantic catalogue". Retrieval adds only what a small model needs per question: the vocabulary values the question names ("Manhatan" → Manhattan) and the two or three closest validated example plans. Numbers never come from retrieved text. |
 | **AI audit log in PostgreSQL** | `ops.ai_audit_log` and prompts versioned in git replace Langfuse (which needs ClickHouse, Redis and S3). It provides the guardrail logs required by Q9. |
 | **Kafka kept as an extension** | Not required; it shows the streaming vision. Provisional rows **never** enter `fct_trip` or governed metrics. |
-| **Removed** | pgvector, Langfuse, Tempo/OpenTelemetry, PgBouncer, pgAdmin, Celery beat, NOAA weather, OpenMetadata, Traefik, Loki. |
+| **Left out** | pgvector, Langfuse, PgBouncer, pgAdmin, Celery beat, NOAA weather, OpenMetadata, Traefik: each would add a service without improving a mark or the defence. (Loki, Tempo and OpenTelemetry, first left out, were added with the observability wave.) |
 
 ---
 
@@ -311,7 +320,7 @@ Every step runs in the Airflow DAG.
 
 | Source | URL | Notes |
 |---|---|---|
-| Yellow Taxi Parquet | `https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_{YYYY}-{MM}.parquet` | One file per month. **13 months: 2024-12 → 2025-12.** Fallback if loading is too slow: 2024-12 → 2025-06 (7 months). |
+| Yellow Taxi Parquet | `https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_{YYYY}-{MM}.parquet` | One file per month. **22 months loaded: 2024-12 → 2026-09**, the latest file published in November 2026; later months load on the monthly schedule. |
 | Taxi Zone Lookup | `https://d37ci6vzurychx.cloudfront.net/misc/taxi_zone_lookup.csv` | 265 zones; 264 and 265 are Unknown / N/A. |
 | Zone shapefile | `https://d37ci6vzurychx.cloudfront.net/misc/taxi_zones.zip` | For Superset maps (converted to GeoJSON). |
 | US public holidays | Python library `holidays` (US + NY) → dbt seed | Documented external source; needed by Dashboard 2. |
@@ -348,7 +357,11 @@ effect on `trips_per_active_hour`.
 - `RatecodeID`: 1 Standard, 2 JFK, 3 Newark, 4 Nassau/Westchester, 5 Negotiated, 6 Group ride, 99 Unknown.
 - `VendorID`: 1 Creative Mobile Technologies, 2 Curb Mobility, 6 Myle Technologies, 7 Helix.
 
-Licence: public data from NYC Open Data, to be cited in `docs/source_contract.md`.
+Licence and use: public data published by the NYC Taxi and Limousine Commission
+(https://www.nyc.gov/site/tlc/about/tlc-trip-record-data.page) under the NYC Open Data
+terms of use; field definitions in the TLC Yellow Taxi data dictionary
+(https://www.nyc.gov/assets/tlc/downloads/pdf/data_dictionary_trip_records_yellow.pdf).
+The project's own data dictionary is `docs/data_dictionary.md`.
 
 ### Operational behaviour (Q2.5)
 
@@ -401,9 +414,11 @@ The row is also written as JSON under `manifests/` in the landing zone.
 | `loader` | writes `bronze` and `ops` |
 | `transformer` | reads `bronze` and `ops`, writes `silver` and `gold` |
 | `publisher` | reads `gold` and `ops`, owns the `analytics` views, writes `semantic` |
-| `superset_reader` | `SELECT` on `analytics` only |
-| `ai_reader` | `SELECT` on `analytics` and `semantic` only; `statement_timeout = 10s`; read-only transactions. The only role that runs LLM-planned queries. |
+| `superset_reader` | `SELECT` on `analytics` only (and on the forecasts in `ml`, the provisional trips in `stream`) |
+| `ai_reader` | `SELECT` on `analytics` and `semantic` only (plus `ml` and `stream` for the forecast pages); `statement_timeout = 10s`; read-only transactions. The only role that runs LLM-planned queries. |
 | `ai_audit_writer` | `INSERT` on `ops.ai_audit_log` only, on a separate connection |
+| `forecaster` | reads `analytics`, writes the `ml` schema only (`08_ml.sql`) |
+| `streamer` | `SELECT` and `INSERT` on `stream.yellow_trips` and its rejects only (`09_stream.sql`) |
 
 Verified: `loader` cannot create tables in silver or gold; `transformer` cannot modify
 bronze or create in analytics; `superset_reader` and `ai_reader` cannot read bronze or ops;
@@ -484,7 +499,7 @@ The trial proves that each set of packages installs together. Running them (`dbt
 - `models/intermediate/` (= **silver**): `int_trips_flagged` → `silver.trips` (flags, status, deduplication), `int_trips_quarantine` → `silver.trips_quarantine`, `quality_flag_catalog`.
 - `models/marts/` (= **gold**): `fct_trip`, dimensions, `agg_*`, `recon_bronze_silver`.
 - `seeds/`: `us_ny_holidays` (US federal + New York State holidays, library `holidays` 0.108).
-- `models/semantic/` (planned, wave 4): MetricFlow semantic models and metrics.
+- `models/semantic/`: MetricFlow semantic models and the governed metrics (section 9).
 
 **Monthly incremental logic** (`macros/months_to_process.sql`): a month is rebuilt when its
 latest loaded batch differs from the batch already in the model, together with its two
@@ -615,7 +630,7 @@ The three analyses are derived indicators built from governed metrics; they are 
 `unique` and `not_null` on every key, `accepted_values` on codes, `relationships` from the
 fact to the dimensions, business assertions (no row lost between bronze and silver; every
 `valid` trip respects the agreed thresholds), source `freshness` on the ingestion manifest
-(warn 45 days, error 75 days since the last successful load). Planned: enforced contracts
+(warn 45 days, error 75 days since the last successful load). Possible next steps: enforced contracts
 on marts, dbt unit tests on the flag logic, volume test against the previous month.
 **Blocking tests are on silver**: when one fails, dbt skips every gold model downstream.
 
@@ -628,10 +643,17 @@ logic), `service_period_sk()`, `generate_schema_name()`.
 
 ### Exposures and documentation
 
-Planned (wave 4): `models/exposures.yml` declares the six Superset dashboards and the AI
-assistant as dbt `exposures`, so the lineage graph goes from the source file to the
-dashboard (Q11). The generated documentation site (models, sources, tests, lineage) is
-exported to `docs/dbt_docs/`; it will also be served in Compose (port 8085).
+`models/exposures.yml` declares the six Superset dashboards and the AI assistant as dbt
+`exposures`, so the lineage graph goes from the source file to the dashboard (Q11). The
+generated documentation site (models, sources, tests, lineage) is exported to
+`docs/dbt_docs/` (open `index.html`); the data dictionary `docs/data_dictionary.md` is
+generated from it by `scripts/data_dictionary.py` (descriptions from the YAML, types from
+the warehouse).
+
+The macro `test_scope()` (with dbt's `get_where_subquery` hook) makes the tests of the trip
+tables read the month a run loads, set by the DAG through the variable `test_month`: the
+month itself for `fct_trip`, with its neighbours for bronze and silver; by default the
+latest loaded month; `all` for every month.
 
 ---
 
@@ -713,7 +735,7 @@ docker compose --profile core --profile tools run --rm -e SUPERSET_URL=http://su
   status and flag (18), generated from its columns. The three analysis datasets (revenue
   bridge, drop-off growth, route duration anomaly) carry derived indicators, labelled as
   such. Role `Analyst Manhattan` with a row-level security rule on 5 datasets.
-- `services/metrics_sync/dashboards.py`: six dashboards, 55 charts of 15 kinds (trend
+- `services/metrics_sync/dashboards.py`: six dashboards, 57 charts of 15 kinds (trend
   KPIs, dual-axis bars and line, rolling mean, heatmap, origin-destination matrix,
   bubble chart, treemap, revenue waterfall, growth and decline rankings, anomaly table).
   Every chart description states the strategic question it answers. Every dashboard has
@@ -748,17 +770,20 @@ its status against the agreed threshold) and ends with a Markdown block: a plain
 
 | # | Dashboard | Strategic question | Key elements |
 |---|---|---|---|
-| 1 | Executive Pulse | Are trips and revenue healthy? | week-over-week and month-over-month KPIs, revenue decomposition (volume, distance, fare, tolls, fees), valid versus all rows, borough contribution, freshness and completeness |
+| 1 | Executive Pulse | Are trips and revenue healthy? | week-over-week, month-over-month and **year-over-year** KPIs (each calendar month, one line per year), revenue decomposition (volume, distance, fare, tolls, fees), valid versus all rows, borough contribution, freshness and completeness |
 | 2 | Demand Rhythm | When should capacity increase? | hour × weekday heatmap, weekday / weekend / holiday, trips per active hour by borough, peaks, seasonality versus a 3-month baseline, airport versus city |
 | 3 | Geography and Routes | Where is the value moving? | choropleth map, top zones, growing and declining dropoff zones, pickup → dropoff routes, volume versus revenue per mile, airports |
 | 4 | Fare, Payment and Customer | What is changing in trip economics? | fare components over time, tip rate by payment type / borough / hour / fare band, cash and card shares, rate codes, fare per mile, `cbd_congestion_fee` |
 | 5 | Service Efficiency and Anomalies | Where should leaders look closer? | long durations, suspicious rate by vendor / borough / month, normal versus current duration (z-score), row counts per batch, quality threshold "pause decision" |
 | 6 | City and Airport Strategy | What action should we take next? | airport demand, mix of airport / Manhattan core / outer boroughs, demand versus revenue, underserved zones (proxy), **estimated CO₂**, top three actions with validating analysis |
 
-Year-over-year comparison is not available with 13 months (only December 2024 versus
-December 2025): month-over-month is used and the limit is stated.
+Year-over-year comparison became possible once thirteen months were published: two charts
+of the Executive Pulse draw each calendar month with one line per year, and its "So what?"
+block compares the latest month with the same month a year earlier (shown "n/a" while that
+month is not published).
 
-Exports: `superset/dashboards/*.zip`, screenshots in `docs/evidence/q7/`, note `docs/dashboards.md`.
+Evidence (`docs/evidence/q07/`): the dashboard bundle exported from Superset, screenshots,
+and a note listing the governed metrics each dashboard uses.
 
 ---
 
@@ -872,7 +897,7 @@ docker compose --profile core --profile observability up -d   # Grafana on http:
 | Metrics | Prometheus + exporters | host (node-exporter), every container (cAdvisor), PostgreSQL and the **pipeline state read from the ops tables** (postgres-exporter custom queries: last run, data age, months published, dbt failures, signals, valid-trip rate, unexplained rows, ingestion batches, AI audit), Airflow and Superset (StatsD), Redis, the assistant (`/metrics`: answers, step durations, model tokens, guardrails) |
 | Logs | Loki + Grafana Alloy | every container, labelled by Compose service; the assistant writes one line per answer with its trace id |
 | Traces | Tempo (OpenTelemetry) | one trace per question: HTTP request, guards, plan, validate, execute (SQL), narrate; span metrics and service graph |
-| Alerts | Prometheus rules + Alertmanager | 12 rules as code: stale data, valid-trip rate below 85 %, unexplained rows, failed run, failed dbt tests, slow or unavailable model, narratives replaced, memory and swap pressure, container restarts, component down |
+| Alerts | Prometheus rules + Alertmanager | 14 rules as code: stale data, valid-trip rate below 85 %, unexplained rows, failed run, failed dbt tests, slow or unavailable model, narratives replaced, memory and swap pressure, container restarts, component down, forecast drift, Kafka consumer lag |
 
 Grafana opens on **"0. Platform overview: where is the problem?"**: one status per layer in
 the order the data flows (source, transformation and quality, BI and AI, host); each tile
@@ -911,21 +936,30 @@ zone and hour of the next month: 260 zones × 24 hours × 30 days, the empty hou
 zeros. Trip volume is a proxy for demand: a ride that found no taxi leaves no trace, so the
 forecast predicts recorded trips, not need.
 
-**Two methods compete every month** (`ml/src/forecasting/`):
+**Three methods compete every month** (`ml/src/forecasting/`):
 
 - the **seasonal baseline**: the zone's mean at that hour and weekday over the last four
-  weeks, public holidays left out; its 80 % range comes from its own past errors, by level
-  of the forecast;
-- the **challenger**: LightGBM (Poisson objective; calendar, holiday, lags at four and eight
-  weeks, zone-hour level, demand tier), with quantile models (10 % and 90 %) for its range.
+  weeks, public holidays left out;
+- the **adjusted baseline**: the same, corrected per borough by the recent trend (last two
+  weeks against the two before, halved, within ±10 %) and by the change the same month
+  showed a year earlier (within −20 % and +25 %), once a year of history exists;
+- **LightGBM** (Poisson objective; calendar, holiday, lags at four and eight weeks,
+  zone-hour level, demand tier, two-week trend, last year's same month, last month's error
+  per zone and borough), with quantile models (10 % and 90 %) for its range.
+
+The 80 % range of a baseline comes from its real errors over the six previous months, by
+level of the forecast.
 
 **Rolling backtests, never a random split**: each of the last three months is forecast from
-the weeks before it, the model trained on the earlier months only. The model replaces the
-baseline only if it wins most months, has the better mean error and is not worse on the
-busiest zones (92 % of trips). Error is WMAPE (defined with zero hours, weighted by trips),
+the weeks before it, the model trained on the earlier months only. A challenger replaces
+the seasonal baseline only if it wins most months, has the better mean error and is not
+worse on the busiest zones (92 % of trips); among those that qualify, the lowest mean error
+wins. Error is WMAPE (defined with zero hours, weighted by trips),
 reported per borough, per demand tier (high ≥ 20 trips an hour, medium ≥ 2, low ≥ 0.2,
 sparse below) and per borough and day; sparse zones are flagged low confidence, never
 hidden in an average.
+
+First run, on six months of history (two methods then):
 
 | Test month | Baseline, zone-hour | Model, zone-hour | Baseline, borough-day | Winner |
 |---|---|---|---|---|
@@ -963,6 +997,64 @@ What the check found: in May activity rose and the four-week baseline lagged beh
 to 24 % too low outside Manhattan, Brooklyn −23.9 %), while the Memorial Day weekend was
 forecast too high; in April the borough-day range was too narrow (calibrated on one test
 month only). Revenue: April 6.1 % (promised 10.2 %), May 14.6 % (promised 8.2 %), drift.
+
+**Learning from the gap.** The check feeds the next forecast in three ways:
+
+1. last month's error of the baseline, per zone and per borough, is a model feature
+   (recomputed for every backtest origin, so the backtests use it too);
+2. LightGBM's training rows are weighted by age, half-life six months, three months when
+   one of the last two checks was a drift: the model forgets an outdated pattern faster;
+3. the champion is chosen again every month on fresh backtests, and the range calibrated
+   again on the latest errors.
+
+The half-life is logged in MLflow (`half_life_months`) and printed by the job with the
+latest checks.
+
+**Negative result kept.** Correcting the baseline directly by last month's error made it
+worse (14.5 % against 12.9 % per borough and day over the published months): most monthly
+errors come from seasonal changes (back to school in September, the holidays) that do not
+carry over to the next month. That error stays a model feature only. The two-week trend
+and last year's same month each improved it (12.6 % and 12.5 %; January 2026 from 20.7 %
+to 16.0 %), hence the adjusted baseline. To measure the three methods on every published
+month:
+
+```bash
+docker compose --profile core --profile ml run --rm --no-deps forecast --compare-baselines
+```
+
+**Replay of 18 months with the three methods** (`--replay 2025-04 … 2026-09`: each month
+forecast again from the months before it only, then checked; error per borough and day):
+
+| Period | Seasonal baseline alone | Champion chosen each month |
+|---|---|---|
+| April 2025 to September 2026 (18 months) | 12.4 % | 12.2 % |
+| April to September 2026 | 11.4 % | **9.2 %** |
+| July to September 2026 | 15.1 % | **10.1 %** |
+
+Champions: the baseline 10 times, the adjusted baseline twice, LightGBM 6 times (from
+March 2026, once a full year of history gives it last year's same month). Five of the
+first ten months drifted; none since February 2026. The choice has a cost: the adjusted
+baseline, better on its backtests, did worse in August 2025 (16.7 % against 13.4 %) and
+February 2026 (15.4 % against 10.8 %). The October 2026 forecast is LightGBM's (backtests:
+22.1 % per zone and hour against 26.6 % for the baseline).
+
+A forecast month with no recorded trip is not checked (`check.NotRecorded`): during the
+calendar gap below, February 2026 had been checked against an empty month (error NaN,
+judged "ok"). That row is kept; wherever a month has several checks, a measured one
+stands for it (`check.MEASURED_FIRST`, the API and the drift alert).
+
+**The check found a calendar gap.** From February 2026 the job kept forecasting the same
+month: `dim_date` ended on 31 January 2026 (`calendar_end`), so later trips were given the
+Unknown date (-1), passed every relationship test and disappeared from the published views.
+The calendar now runs to December 2027 and `assert_valid_trips_have_a_calendar_date`
+blocks a publication in which a valid trip has no date. Repair on an existing warehouse:
+`dbt seed --select us_ny_holidays`, then `dbt run --select dim_date fct_trip+` with the
+affected source months **and the month before the first one** (`--vars '{months: [...]}'`):
+the test's first run caught a January 2026 trip that started at 00:45 on 1 February.
+
+**Alerts** (Prometheus, shown in Grafana): `ForecastDrift` when the latest check of a
+target is a drift (from `ml.forecast_check_run`, through postgres-exporter), and
+`KafkaConsumerLag` when the stream consumer falls behind (kafka-exporter).
 
 The forecast is used by the **Forecast** page, the **Shift planner** and forecast questions
 in the assistant (section 11).
@@ -1139,6 +1231,10 @@ long-running service, named persistent volumes, `depends_on: condition: service_
 
 ## 14. Build plan (16 → 30 November)
 
+The plan as written on 16 November, kept to show how the work was organised; what was
+actually built is in section 1 (the React front end was finished, so the Streamlit fallback
+was never needed, and MLflow, Kafka and Grafana were all built).
+
 | Wave | Days | Content | Acceptance criteria |
 |---|---|---|---|
 | **1** | D1–D2 (16–17) | Repository, Compose `core`, schemas and roles, RustFS, idempotent ingestion and manifest, partitioned bronze, zones; **compatibility trial** Airflow 3 / Cosmos / dbt / MetricFlow with pinned versions | ingestion of 2025-01 succeeds; re-run = `skipped_unchanged`; missing month = logged failure; file count = bronze count; 2024-12 loaded with contract v2024 |
@@ -1223,15 +1319,13 @@ dashboard and explain the approval step · show a limitation the platform honest
 - CO₂ is an estimate based on a distance factor.
 - Geographic bias: Yellow Taxi coverage is centred on Manhattan and the airports.
 - Correlation is not causation.
-- No full year-over-year comparison with 13 months.
+- Year-over-year comparisons cover the months from December 2025 on (22 months loaded).
 - MetricFlow is not connected directly to Superset (governed fallback and consistency test).
 - The LLM can misinterpret a question: validation, provenance and human review are required.
-  A known gap: the number check verifies that a figure is in the result, not its unit (a
-  percentage once described as trips in a comparison by borough).
-- The forecast predicts recorded trips, not need. Six months of history: no June, no
-  summer and no year-over-year pattern in training; a holiday such as Juneteenth (19 June)
-  is known from the calendar but has never been seen. The seasonal baseline lags a rising
-  trend (drift in May); a trend correction is the next improvement.
+  The number check verifies each figure and its unit, its zone, hour and month, not the
+  reasoning around it.
+- The forecast predicts recorded trips, not need. It has no weather or event data, so it
+  still lags a sudden change; last year's same month only exists from December 2025 on.
 - The shift planner describes a zone's opportunity, shared by every taxi working it: the
   data has no taxi or driver identifier, so no per-taxi earnings.
 - Streamed rows are provisional and approximately filtered (no duplicate detection across
@@ -1244,9 +1338,8 @@ queried directly by every tool, separate environments and backups.
 
 ## 18. Next step
 
-1. Publish June 2025 through the monthly pipeline: the forecast job then checks the live
-   June forecast against it and forecasts July.
-2. Final deliverables: proposal (Q1), architecture and data-model diagrams, data
-   dictionary, dashboard exports, demonstration video, submission zip.
-3. If time allows: a trend correction for the seasonal baseline, consumer lag and drift
-   alerts in Grafana, a unit check on comparison narratives.
+1. October 2026 is loaded by the monthly schedule (3rd of the month, 06:00) when the TLC
+   publishes it; its forecast is then checked and November forecast.
+2. Final deliverables: dashboard exports, demonstration video, submission zip.
+3. After the exam: weather and event data for the forecast, the stream fed by a live
+   source instead of a replay, separate environments and backups.

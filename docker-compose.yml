@@ -599,6 +599,17 @@ services:
     mem_limit: 2g
     restart: "no"
 
+  # Topic offsets and the consumer group's lag for Prometheus (alert KafkaConsumerLag).
+  kafka-exporter:
+    image: danielqsj/kafka-exporter:v1.8.0
+    profiles: [stream]
+    command: ["--kafka.server=kafka:9092"]
+    depends_on:
+      kafka:
+        condition: service_healthy
+    mem_limit: 128m
+    restart: unless-stopped
+
   kafka-ui:
     image: provectuslabs/kafka-ui:v0.7.2
     profiles: [stream]

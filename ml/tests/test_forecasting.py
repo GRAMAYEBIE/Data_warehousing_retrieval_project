@@ -105,9 +105,9 @@ def result(history):
 
 def test_a_run_backtests_three_months_and_forecasts_the_next(result):
     assert sorted(set(result.backtests.month)) == ["2025-03", "2025-04", "2025-05"]
-    assert set(result.backtests.method) == {"model", "baseline"}
+    assert set(result.backtests.method) == {"model", "baseline", "adjusted"}
     assert result.validated_month == "2025-05" and result.forecast_month == "2025-06"
-    assert result.champion in {"model", "baseline"}
+    assert result.champion in {"model", "baseline", "adjusted"}
     assert set(result.forecast["method"]) == {result.champion}
     assert len(result.forecast) == 5 * 30 * 24
     assert (result.forecast.lower <= result.forecast.predicted).all()
@@ -261,6 +261,22 @@ def test_a_month_not_recorded_yet_cannot_be_checked(history, checked):
         compare(history_until(history, "2025-04"), replayed.forecast, replayed.daily, 0.05)
 
 
+def test_a_month_loaded_without_any_trip_is_left_pending(history, checked):
+    """Observed: during the calendar gap of 2026 a month was loaded with no dated trip in the
+    published views; its check stored an error of NaN that was judged "ok"."""
+    import dataclasses
+
+    from forecasting.check import MEASURED_FIRST, NotRecorded, compare
+
+    replayed, _ = checked
+    trips = history.trips.copy()
+    trips[:, history.days.month == 5, :] = 0
+    with pytest.raises(NotRecorded):
+        compare(dataclasses.replace(history, trips=trips), replayed.forecast, replayed.daily, 0.05)
+    # Where a month already has such a check, a measured one stands for it.
+    assert MEASURED_FIRST.startswith("(actual_wmape IS NULL OR actual_wmape = 'NaN')")
+
+
 def test_drift_is_an_error_well_above_what_the_backtests_promised(history, checked):
     from forecasting.check import compare, status_of
 
@@ -276,3 +292,95 @@ def test_drift_is_an_error_well_above_what_the_backtests_promised(history, check
     assert check.scores.set_index(["segment_type", "segment"]).loc[
         ("overall", "all"), "bias"
     ] == pytest.approx(1.0, abs=0.15)
+
+
+# ------------------------------------------------------------------ learning from the gap
+def test_last_month_gap_is_the_baseline_error_of_the_month_before(history):
+    from forecasting.features import last_month_gap
+
+    origin = pd.Timestamp("2025-04-01")
+    zone, borough = last_month_gap(history, origin)
+    # By hand for zone 0: the March forecast is the weekday-hour mean of the 4 weeks before
+    # March, applied to each day of March; then (forecast - recorded) / recorded.
+    p = int((history.days < pd.Timestamp("2025-03-01")).sum())
+    o = int((history.days < origin).sum())
+    window, days = history.trips[0, p - 28 : p, :], history.days[p - 28 : p]
+    profile = np.stack([window[days.dayofweek == k].mean(axis=0) for k in range(7)])
+    forecast = profile[history.days[p:o].dayofweek].sum()
+    recorded = history.trips[0, p:o, :].sum()
+    assert zone[0] == pytest.approx((forecast - recorded) / (recorded + 24))
+    assert borough[0] == pytest.approx((forecast - recorded) / recorded)
+    # Too early: no month with four weeks before it.
+    assert np.isnan(last_month_gap(history, pd.Timestamp("2025-01-01"))[0]).all()
+
+
+def test_last_year_needs_a_year_of_history():
+    from forecasting.features import last_year
+
+    short = synthetic(months=6)
+    origin = pd.Timestamp("2025-05-01")
+    profile, ratio = last_year(short, origin, month_days(origin))
+    assert np.isnan(profile).all() and np.isnan(ratio).all()
+    long = synthetic(months=15, seed=4)  # 2024-12 to 2026-02
+    origin = pd.Timestamp("2026-01-01")
+    profile, ratio = last_year(long, origin, month_days(origin))
+    assert np.isfinite(profile).all() and np.isfinite(ratio).all()
+    assert 0.5 < ratio[0] < 2
+
+
+def test_the_adjusted_baseline_factor_is_bounded_and_neutral_without_signal():
+    from forecasting.features import adjustment
+
+    trend = np.array([np.nan, 2.0, 0.5, 1.1])
+    ly = np.array([np.nan, 3.0, 0.1, 1.0])
+    factor = adjustment(trend, ly)
+    assert factor[0] == 1.0  # nothing known: the plain baseline
+    assert factor[1] == pytest.approx(1.10 * 1.25)  # strong rise: half of it, bounded
+    assert factor[2] == pytest.approx(0.90 * 0.80)
+    assert factor[3] == pytest.approx(1.05)  # half of a 10 % rise
+
+
+def test_the_champion_is_chosen_among_three_methods():
+    scores = pd.DataFrame(
+        {"baseline_wmape": [0.20, 0.21, 0.22], "baseline_high": [0.10] * 3,
+         "adjusted_wmape": [0.18, 0.19, 0.20], "adjusted_high": [0.09] * 3,
+         "model_wmape": [0.19, 0.20, 0.21], "model_high": [0.09] * 3}
+    )  # fmt: skip
+    champion, decision = pipeline.choose(scores)
+    assert champion == "adjusted" and decision.startswith("adjusted baseline promoted")
+    assert "LightGBM model beat the baseline in 3 of 3" in decision
+
+
+def test_learning_from_the_gap_follows_a_rising_trend():
+    """Activity rising 6 % a month: the plain baseline lags, the adjusted one follows the
+    recent trend."""
+    from forecasting import evaluate
+
+    base = synthetic(months=6, seed=5)
+    growth = 1.06 ** ((base.days - base.days[0]).days.to_numpy() / 30.4)
+    rising = History(**{**base.__dict__, "trips": base.trips * growth[None, :, None]})
+    start = pd.Timestamp("2025-05-01")
+    frame = pipeline.naive_frame(rising, start)
+    plain = evaluate.wmape(frame.actual.to_numpy(), frame.baseline.to_numpy())
+    adjusted = evaluate.wmape(frame.actual.to_numpy(), frame.adjusted.to_numpy())
+    assert adjusted < plain
+
+
+def test_recent_months_weigh_more_and_more_so_after_a_drift():
+    from forecasting.model import HALF_LIFE, half_life_for, recency_weights
+
+    w = recency_weights(np.array([0, 0, 6, 12]), HALF_LIFE)
+    assert w[-1] == 1.0 and w[2] == pytest.approx(0.5) and w[0] == pytest.approx(0.25)
+    assert half_life_for(["ok", "ok"]) == HALF_LIFE
+    assert half_life_for(["drift", "ok"]) < HALF_LIFE
+    assert half_life_for([]) == HALF_LIFE  # nothing checked yet
+
+
+def test_the_memory_reaches_the_model(history):
+    """A shorter memory changes the trained model (the weights are really used)."""
+    from forecasting.model import fit, origins
+
+    starts = origins(history)[:3]
+    long, short = fit(history, starts, 6.0), fit(history, starts, 1.0)
+    x = build(history, starts[-1], month_days(starts[-1]))
+    assert not np.allclose(long.mean.predict(x[FEATURES]), short.mean.predict(x[FEATURES]))

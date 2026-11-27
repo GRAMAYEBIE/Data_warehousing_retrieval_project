@@ -82,12 +82,14 @@ REVENUE_TABLES = {
 
 
 # Forecast against actual (ml/check.py): each forecast month checked once recorded. One
-# check per target and month: the live forecast when there is one, else the replay.
+# check per target and month: a measured one first (a check stored with an error of NaN
+# measured nothing), then the live forecast when there is one, else the replay.
 LATEST_CHECKS = """
 WITH latest AS (
     SELECT DISTINCT ON (target, month) *
     FROM ml.forecast_check_run
-    ORDER BY target, month, replay, checked_at DESC
+    ORDER BY target, month, (actual_wmape IS NULL OR actual_wmape = 'NaN'), replay,
+             checked_at DESC
 )"""
 CHECK_TABLES = {
     "checks": LATEST_CHECKS

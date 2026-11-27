@@ -11,6 +11,8 @@ import time
 import uuid
 from dataclasses import dataclass, field
 
+import psycopg
+
 from assistant import forecast_questions, guards, metrics, retrieval, telemetry
 from assistant.catalog import DIMENSIONS, RELATIONS, Catalog, load_catalog
 from assistant.config import Settings
@@ -26,6 +28,7 @@ from assistant.llm import (
 from assistant.resolver import UnsafeSQL, build, pivot_comparison, render
 from assistant.schemas import (
     Answer,
+    DateRange,
     Filter,
     Intent,
     MetricProvenance,
@@ -574,6 +577,8 @@ class Assistant:
         """The answer from the published forecast, or None for the governed path."""
         fq = forecast_questions
         cat = self.catalog()
+        if fq.wants_accuracy(question):  # "How accurate was the May forecast?"
+            return self.forecast_accuracy(question, session)
         # A question with its own forecast words starts afresh; only a short one without
         # them ("and for Queens?") continues the previous forecast answer.
         fresh = fq.wants_forecast(question, cat)
@@ -715,6 +720,77 @@ class Assistant:
             {"rendered_sql": rendered, "row_count": len(result.rows), "narrative_check": check},
         )
 
+    def forecast_accuracy(self, question: str, session: Session) -> tuple[Answer, dict]:
+        """How a past forecast did, from the forecast-against-actual checks (ml schema)."""
+        fq = forecast_questions
+        target = "revenue" if fq.REVENUE_WORDS.search(question.lower()) else "trips"
+        base = {"session_id": session.session_id, "question": question}
+        try:
+            columns, rows, narrative, facts = fq.accuracy(self.store, question, target)
+        except (psycopg.errors.UndefinedTable, psycopg.errors.InvalidSchemaName):
+            columns, rows, narrative, facts = [], [], "", {}
+        if not rows:
+            return (
+                Answer(
+                    **base,
+                    status="empty",
+                    narrative="No forecast has been checked against what happened for that "
+                    "month yet: a month is checked once its trips are published.",
+                ),
+                {},
+            )
+        month = facts["month"]
+        plan = QueryPlan(
+            intent=Intent.breakdown,
+            metrics=["forecast_error"],
+            dimensions=["pickup_borough"],
+            date_range=DateRange(period=Period.custom, start_month=month, end_month=month),
+        )
+        rendered = fq.shown_sql(facts["sql"], {"target": target, "month": month})
+        provenance = Provenance(
+            metrics=[
+                MetricProvenance(
+                    name="forecast_error",
+                    label="Forecast error per borough and day",
+                    definition="Share of the recorded value missed or over-counted (WMAPE) "
+                    f"by the published {target} forecast, per borough and day.",
+                    sql_expression="sum(|forecast - recorded|) / sum(recorded)",
+                    unit="ratio",
+                    filters="the live check of the month, else its replay",
+                    is_estimate=True,
+                )
+            ],
+            source_months=[month],
+            period_resolved={"period": month, "compared_with": ""},
+            published_run="ml.forecast_check",
+            published_at="",
+            valid_trip_rate=None,
+            active_filters=[],
+            rendered_sql=rendered,
+            row_count=len(rows),
+            data_layer="ml (forecast against actual, read-only role ai_reader)",
+        )
+        return (
+            Answer(
+                **base,
+                status="answered",
+                plan=plan,
+                columns=columns,
+                rows=rows,
+                narrative=narrative,
+                narrative_check="not_needed",
+                reasons=["forecast: accuracy from the monthly forecast-against-actual check"],
+                suggested_chart="bar",
+                suggested_followup="How many trips are expected next month?",
+                limitations=[
+                    "The error is that of the forecast as it was published, measured once the "
+                    "month's trips were recorded.",
+                ],
+                provenance=provenance,
+            ),
+            {"rendered_sql": rendered, "row_count": len(rows)},
+        )
+
     # ------------------------------------------------------------------ helpers
     def narrate(
         self, question, plan, columns, rows, period, filters
@@ -794,6 +870,15 @@ class Assistant:
                 f"narrative replaced, months swapped: {'; '.join(swapped[:3])}. "
                 f"Model text: {text[:400]}",
             )
+        # ... or written with the wrong unit ("37.69 trips" for a 37.69 % change).
+        mislabelled = guards.wrong_units(text, columns, rows[:20], units)
+        if mislabelled:
+            return (
+                fallback,
+                "replaced",
+                f"narrative replaced, wrong unit: {'; '.join(mislabelled[:3])}. "
+                f"Model text: {text[:400]}",
+            )
         return text, "passed", None
 
     @staticmethod
@@ -830,7 +915,8 @@ class Assistant:
             f"- Breakdowns available: {dimensions}.\n"
             "- Forecast: next month's trips and revenue per pickup zone, day and hour, "
             "published by a monthly job tracked in MLflow. A seasonal baseline (same weekday "
-            "and hour over the last four weeks) and a LightGBM model compete on the three "
+            "and hour over the last four weeks), an adjusted baseline (recent trend and "
+            "last year's seasonality), and a LightGBM model compete on the three "
             "previous months; the winner is used. Questions such as 'How many trips are "
             "expected in Manhattan next month?' are answered from it by code, labelled as "
             "estimates. The Forecast page shows its accuracy; the Shift planner page compares "
