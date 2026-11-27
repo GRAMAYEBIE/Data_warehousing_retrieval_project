@@ -215,6 +215,31 @@ def swapped_months(narrative: str, columns: list[str], rows: list[list], period:
     return problems
 
 
+# Rates of money over money: written as a share of trips, they change meaning.
+AMOUNT_RATIOS = {"tip_rate": "tips divided by the metered fare"}
+SHARE_OF_TRIPS = re.compile(
+    r"\b(?:(?:share|proportion|percentage|fraction|majority|most|half)\s+of\s+(?:the\s+)?"
+    r"(?:\w+\s+){0,2}(?:trips|rides|riders|passengers)"
+    r"|%\s+of\s+(?:the\s+)?(?:\w+\s+){0,2}(?:trips|rides|riders|passengers)"
+    r"|(?:trips|rides)\s+(?:where|that|with)\s+(?:a\s+)?tips?\b"
+    r"|(?:trips|rides)\s+(?:\w+\s+){0,3}(?:had|included|received|were\s+given)\s+(?:a\s+)?tips?)",
+    re.I,
+)
+
+
+def misread_rates(narrative: str, metrics: list[str]) -> list[str]:
+    """A true rate given the wrong meaning: "20.7 % of card trips had tips" when the tip rate
+    is tips divided by the fare (observed with qwen2.5:7b, number check passed). Returns
+    the misreadings; empty when no money-over-money rate is in the answer."""
+    rates = [m for m in metrics if m in AMOUNT_RATIOS]
+    if not rates:
+        return []
+    found = SHARE_OF_TRIPS.search(narrative)
+    if not found:
+        return []
+    return [f"{rates[0]} is {AMOUNT_RATIOS[rates[0]]}, written as {found.group(0)!r}"]
+
+
 UNIT_AFTER = re.compile(r"^\s*(?:(trips?|rides?)\b|(%|percent)|(usd|dollars?)\b)", re.I)
 
 

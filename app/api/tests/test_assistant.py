@@ -1010,6 +1010,35 @@ def test_a_figure_written_with_the_wrong_unit_is_caught():
                        {"total_revenue": "USD", "valid_trip_rate": "ratio"}) == []  # fmt: skip
 
 
+def test_a_rate_of_money_written_as_a_share_of_trips_is_caught():
+    from assistant.guards import misread_rates
+
+    # Observed (27 November 2026, qwen2.5:7b): the number check passed, the meaning did not.
+    for wrong in [
+        "**20.7%** of card trips in Queens had tips in August 2026.",
+        "This rate reflects the percentage of card trips where a tip was given.",
+        "It suggests that the majority of card trips in Brooklyn had tips.",
+    ]:
+        assert misread_rates(wrong, ["tip_rate"]), wrong
+    right = "**19.8 %** was the tip rate for card trips in Brooklyn: tips were 19.8 % of fares."
+    assert misread_rates(right, ["tip_rate"]) == []
+    # A share of trips is the right reading for the valid-trip rate.
+    assert misread_rates("90 % of trips were valid.", ["valid_trip_rate"]) == []
+
+
+def test_the_narrator_is_given_the_definition_of_each_metric():
+    class RecordingLLM(FakeLLM):
+        def chat(self, system, user, schema=None, max_tokens=None, **_):
+            self.narrated = user
+            return self.narrative
+
+    store = FakeStore(columns=["trips"], rows=[[249175]])
+    a = assistant(store=store)
+    a.llm = RecordingLLM(plan(metrics=["trips"]), narrative="249,175 trips last month.")
+    a.ask("How many trips did we have last month?")
+    assert "trips: Trips (trips): Valid trips." in a.llm.narrated
+
+
 def test_how_accurate_was_a_forecast_is_answered_from_the_checks():
     from assistant import forecast_questions as fq
 

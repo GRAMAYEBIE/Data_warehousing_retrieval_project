@@ -828,10 +828,14 @@ class Assistant:
                 for row in rows[:20]
             ]
         )
+        # The definition, not only the label: observed, "tip rate" read as the share of trips
+        # with a tip ("20.7 % of card trips had tips") when it is tips divided by the fare.
         message = (
             f"QUESTION: {question}\n"
             "METRICS: "
-            + "; ".join(f"{m}: {d['label']} ({d['unit']})" for m, d in metrics.items())
+            + "; ".join(
+                f"{m}: {d['label']} ({d['unit']}): {d['description']}" for m, d in metrics.items()
+            )
             + f"\nPERIOD: {period}\nFILTERS: {filters or 'none'}\n"
             f"RESULT (columns, then up to 20 rows):\n{table}"
         )
@@ -877,6 +881,15 @@ class Assistant:
                 fallback,
                 "replaced",
                 f"narrative replaced, wrong unit: {'; '.join(mislabelled[:3])}. "
+                f"Model text: {text[:400]}",
+            )
+        # ... or a true rate given the wrong meaning (a share of trips for tips / fare).
+        misread = guards.misread_rates(text, plan.metrics)
+        if misread:
+            return (
+                fallback,
+                "replaced",
+                f"narrative replaced, definition misread: {'; '.join(misread)}. "
                 f"Model text: {text[:400]}",
             )
         return text, "passed", None

@@ -68,7 +68,7 @@ figure.tall img { max-height: 165mm; }
 /* Screenshots: a thin frame around the image itself. */
 figure img.shot { border: 0.6pt solid var(--line); width: auto; max-width: 100%;
                   max-height: 95mm; }
-figure.compact img.shot { max-height: 72mm; }
+figure.compact img.shot { max-height: 64mm; }
 /* Two screenshots side by side, bottom-aligned, one caption: a wide one and a tall one. */
 figure.pair .row { display: flex; gap: 4mm; align-items: flex-end; justify-content: center; }
 figure.pair .row > img { height: auto; max-height: none; object-fit: contain; }

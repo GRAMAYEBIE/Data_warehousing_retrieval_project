@@ -256,6 +256,28 @@ def test_two_named_months_without_comparison_stay_one_period():
     assert result.plan.compare_to == "none"
 
 
+def test_this_month_with_last_month_is_the_latest_versus_the_one_before():
+    # Observed (27 November 2026): "last month" alone was matched, so August was compared
+    # with July instead of September with August.
+    question = "Compare total revenue by pickup borough this month with last month."
+    model = plan(metrics=["total_revenue"], dimensions=["pickup_borough"])
+    result = ground(model, question, CATALOG, [])
+    assert result.plan.date_range == DateRange(period=Period.latest_month)
+    assert result.plan.compare_to == "previous_period" and not result.missing
+
+
+def test_a_question_by_a_dimension_drops_a_filter_on_it_from_the_conversation():
+    # Observed (27 November 2026): "Compare total revenue by pickup borough ..." after "And
+    # for Queens?" kept the Queens filter and answered for Queens only.
+    queens = [Filter(dimension="pickup_borough", values=["Queens"])]
+    carried = plan(metrics=["total_revenue"], dimensions=["pickup_borough"], filters=queens)
+    result = ground(carried, "Total revenue by pickup borough last month", CATALOG, queens)
+    assert result.plan.filters == []
+    assert any("asks for every" in n for n in result.notes)
+    named = ground(carried, "Total revenue in Queens by pickup borough", CATALOG, queens)
+    assert named.plan.filters == queens
+
+
 def test_follow_up_filters_are_kept_when_they_come_from_the_conversation():
     previous = [Filter(dimension="payment_type", values=["Cash"])]
     follow = plan(

@@ -1035,8 +1035,10 @@ Champions: the baseline 10 times, the adjusted baseline twice, LightGBM 6 times 
 March 2026, once a full year of history gives it last year's same month). Five of the
 first ten months drifted; none since February 2026. The choice has a cost: the adjusted
 baseline, better on its backtests, did worse in August 2025 (16.7 % against 13.4 %) and
-February 2026 (15.4 % against 10.8 %). The October 2026 forecast is LightGBM's (backtests:
-22.1 % per zone and hour against 26.6 % for the baseline).
+February 2026 (15.4 % against 10.8 %). Revenue, replayed the same way: 13.6 % with the
+baseline alone against 11.2 % with the champion over April to September 2026, no drift
+since February 2026. The October 2026 forecast is LightGBM's (backtests: 22.1 % per zone
+and hour against 26.6 % for the baseline).
 
 A forecast month with no recorded trip is not checked (`check.NotRecorded`): during the
 calendar gap below, February 2026 had been checked against an empty month (error NaN,
@@ -1332,7 +1334,7 @@ dashboard and explain the approval step · show a limitation the platform honest
   files); only the official file is published and measured.
 
 Future improvements: a columnar warehouse engine for larger volumes, a semantic layer
-queried directly by every tool, separate environments and backups.
+queried directly by every tool, separate environments, and a managed database and object store with backups, shared by several users.
 
 ---
 
@@ -1340,6 +1342,7 @@ queried directly by every tool, separate environments and backups.
 
 1. October 2026 is loaded by the monthly schedule (3rd of the month, 06:00) when the TLC
    publishes it; its forecast is then checked and November forecast.
-2. Final deliverables: dashboard exports, demonstration video, submission zip.
+2. Final deliverables: demonstration video and submission zip (dashboard exports and evidence are in `docs/evidence/`).
 3. After the exam: weather and event data for the forecast, the stream fed by a live
-   source instead of a replay, separate environments and backups.
+   source instead of a replay, a managed database and object store with backups for several
+   users, separate environments.

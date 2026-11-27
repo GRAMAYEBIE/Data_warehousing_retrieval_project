@@ -80,6 +80,8 @@ def named_period(question: str) -> DateRange | None:
     )
     if months:
         return DateRange(period=Period.custom, start_month=months[0], end_month=months[-1])
+    if relative_comparison(question):
+        return DateRange(period=Period.latest_month)  # compared with the month before
     for pattern, period in RELATIVE:
         if re.search(pattern, text):
             return DateRange(period=period)
@@ -87,6 +89,14 @@ def named_period(question: str) -> DateRange | None:
 
 
 COMPARE_WORDS = r"\b(compared? (with|to)|versus|vs\.?|against|than)\b"
+
+
+def relative_comparison(question: str) -> bool:
+    """ "This month with last month": the latest month compared with the one before. Observed:
+    "last month" alone was matched, and August was compared with July instead of September
+    with August."""
+    text = question.lower()
+    return bool(re.search(RELATIVE[0][0], text) and re.search(RELATIVE[1][0], text))
 
 
 def _month_before(month: str) -> str:
@@ -156,6 +166,9 @@ def ground(
                 f"comparison set from the question: {current} versus {previous_month}"
             )
             result.plan.compare_to = "previous_period"
+    elif relative_comparison(question) and result.plan.compare_to != "previous_period":
+        result.notes.append("comparison set from the question: this month versus last month")
+        result.plan.compare_to = "previous_period"
     if period and result.plan.date_range != period:
         planned = result.plan.date_range.model_dump(mode="json", exclude_none=True)
         result.notes.append(
@@ -203,11 +216,27 @@ def ground(
     for link in named:
         named_by_dimension.setdefault(link.dimension, set()).add(link.value.lower())
 
+    # A question asking for every member of a dimension ("by pickup borough") does not keep
+    # a filter on it from the conversation. Observed: "Compare total revenue by pickup
+    # borough ..." after "And for Queens?" answered for Queens only.
+    per_member = re.search(r"\b(by|per|each|every|all)\b", question.lower()) is not None
+
     kept = []
     for f in result.plan.filters:
         categorical = f.dimension in DIMENSIONS and DIMENSIONS[f.dimension].categorical
         if not categorical:  # hours and flags are not linked by name: kept as planned
             kept.append(f)
+            continue
+        if (
+            per_member
+            and f.dimension in result.plan.dimensions
+            and f.dimension not in named_by_dimension
+            and f.operator in (Operator.eq, Operator.in_)
+        ):
+            result.notes.append(
+                f"filter removed, the question asks for every {DIMENSIONS[f.dimension].label}: "
+                f"{f.dimension} = {', '.join(map(str, f.values))}"
+            )
             continue
         if f.operator in (Operator.neq, Operator.not_in) and not excludes:
             inherited = [v for v in f.values if (f.dimension, str(v).lower()) in context_exclusions]

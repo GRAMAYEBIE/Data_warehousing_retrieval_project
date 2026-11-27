@@ -328,7 +328,8 @@ figure is not given to the wrong zone, hour or month. Any failure replaces the t
 factual summary written by code.
 
 Sessions keep active filters, visible to the user, with a reset button; follow-ups change
-only what they name. An extract of the evaluation transcript (`qwen2.5:7b`):
+only what they name. An extract of the evaluation transcript (`qwen2.5:7b`; a full session
+with plans, guardrails, provenance and audit log is in `docs/evidence/q09/`):
 
 > **Manager:** What was the tip rate in Brooklyn last month?
 >
@@ -370,11 +371,12 @@ was planned with a filter copied from a retrieved example (payment type cash) an
 Brooklyn. A better model was not the fix: code now applies the period named in the
 question, removes any filter value the question does not name, and rejects a plan that
 omits a named zone or borough, giving the model one repair. The case and its follow-up
-*"And for Queens?"* now pass. A second guard came from a real answer: the model wrote
-"37.69 trips" for a percentage, so code now checks the unit after each figure and replaces
-such a text. Automated tests: 88 API tests, dbt tests, ingestion,
-forecasting and stream tests, run by GitHub Actions on every push, plus an end-to-end smoke
-test.
+*"And for Queens?"* now pass. Later guards came from real answers: "37.69 trips" written
+for a percentage (the unit after each figure is now checked), and "20.7 % of card trips had
+tips" for a tip rate, which is tips divided by the fare (the narrator now gets each
+definition, and such a text is replaced; `docs/evidence/q09/`). Automated tests: 92 API
+tests, dbt, ingestion, forecasting and stream tests, run by GitHub Actions on every push,
+plus an end-to-end smoke test.
 
 <figure class="pair"><div class="row"><img class="shot" src="figures/draft_dashboard_superset.png" alt="Draft dashboard created by the assistant"><img class="shot" src="figures/assistant_answer_provenance.png" alt="Assistant answer with its provenance"></div><figcaption>Figure 4. Left (Q8): the request of section 10 built as a [DRAFT] Superset dashboard, waiting for confirmation. Right (Q9): "What was the total revenue last month by pickup borough?", every figure checked against the result, then how it was produced: definition and formula, filters, period, publication, template and read-only role, valid-trip rate.</figcaption></figure>
 
@@ -403,8 +405,8 @@ One Docker Compose file runs every service: PostgreSQL, the object store, Airflo
 execution, Superset with Redis, the API, the web interface, Ollama (or Ollama on the host,
 used on the Apple-silicon lab machine for its GPU), MLflow, Kafka and the observability
 stack. Services are grouped in profiles, have health checks, persistent volumes and
-`depends_on` health conditions; one-shot jobs exit when done. **One command** starts a
-fresh clone:
+`depends_on` health conditions; one-shot jobs exit when done (all services healthy:
+`docs/evidence/q12/`). **One command** starts a fresh clone:
 
 ```
 python scripts/bootstrap.py all --months 2024-12..2025-05
@@ -432,20 +434,19 @@ always labelled as estimates. Three methods compete every month:
   quantile models for the 80 % range, on calendar, profile, trend, last-year and
   last-month-error features.
 
-They are scored on rolling backtests: each of the last three months is forecast from the
-weeks before it, never from a random split. The error is the weighted absolute percentage
-error (WMAPE) per borough and day, also reported per demand level so that the busy
-Manhattan zones cannot hide the rest. A challenger replaces the seasonal baseline only if it
-wins most months, on average and on the busiest zones. The 80 % range is calibrated on the
-real errors of the six previous months. Every run is tracked in MLflow: parameters,
-backtest scores, the champion and the reason it was chosen.
+They are scored on rolling backtests (each of the last three months forecast from the weeks
+before it, never a random split) by the weighted absolute percentage error (WMAPE) per
+borough and day, also per demand level so that busy Manhattan cannot hide the rest. A
+challenger replaces the baseline only if it wins most months, on average and on the
+busiest zones. Ranges are calibrated on the six previous months' errors; every run, with
+its scores and the reason for its champion, is tracked in MLflow.
 
-**Learning from its errors.** When a month is published, the job first checks the forecast
-made for it against what happened, then forecasts the next month. The gap is used three
-ways: last month's error per zone and borough is a model feature; training weights favour
-recent months (half-life six months, three after a drift, so an outdated pattern is
-forgotten faster); and the champion is chosen again each month on fresh backtests. An
-error above 1.5 times and 3 points over its promise is a drift, alerted in Grafana.
+**Learning from its errors.** When a month is published, the job first checks its forecast
+against what happened, then forecasts the next month. The gap is used three ways: last
+month's error per zone and borough is a model feature; training weights favour recent
+months (half-life six months, three after a drift, to forget an outdated pattern faster);
+the champion is chosen again on fresh backtests. An error above 1.5 times and 3 points over
+its promise is a drift, alerted in Grafana.
 
 **A negative result, kept.** Correcting the baseline by last month's error made it worse
 (14.5 % against 12.9 %): most monthly errors come from seasonal turns (back to school, the
@@ -466,7 +467,8 @@ all since March 2026, once a full year of history gave it last year's same month
 the first ten months drifted, on seasonal turns that four weeks of history cannot show;
 none has since February 2026. The choice has a cost: in August 2025 and February 2026 the
 adjusted baseline, better on its backtests, did worse on the month (16.7 % and 15.4 %
-against 13.4 % and 10.8 %). LightGBM made the October 2026 forecast.
+against 13.4 % and 10.8 %). Revenue tells the same story: 13.6 % to 11.2 % over the last
+six months, no drift since February 2026. LightGBM made the October 2026 forecast.
 
 <figure class="compact"><img class="shot" src="figures/forecast_against_actual.png" alt="Forecast against actual, January to September 2026"><figcaption>Figure 5. Forecast against actual on the Forecast page: January 2026 (live check) drifted; every month since, replayed with the new code, came in as expected.</figcaption></figure>
 
@@ -478,9 +480,8 @@ still caught one, a January trip that started at 00:45 on 1 February. A month wi
 recorded trip is no longer checked (February had been, with an empty result).
 
 **Streaming.** A Kafka stream replays the current month trip by trip before its official
-file. A versioned contract sends malformed messages to a dead-letter topic (74 in June,
-distances above 100,000 miles); each trip is written once, provisional, never in a
-governed measure; the consumer's lag is alerted.
+file: a versioned contract sends malformed messages to a dead-letter topic (74 in June);
+each trip is written once, provisional, never governed; consumer lag is alerted.
 
 ## 16. Results, limits and next steps
 
@@ -495,18 +496,17 @@ one machine, without backups.
 Building it also showed that a green test suite is not enough: the calendar gap of
 section 15 passed every test and was found by the forecast check, a control on outcomes,
 not on structure. Next steps: weather and event data for the forecast, the stream fed by a
-live source instead of a replay, and a managed object store and database for a
-multi-user deployment.
+live source instead of a replay, and a managed database and object store, with backups,
+for several users.
 
 ## References
 
-1. NYC Taxi and Limousine Commission, *TLC Trip Record Data*,
-   https://www.nyc.gov/site/tlc/about/tlc-trip-record-data.page (monthly Yellow Taxi files
-   and taxi zone lookup; public data, NYC Open Data terms of use).
+1. NYC Taxi and Limousine Commission, *TLC Trip Record Data* (files and zone lookup; NYC
+   Open Data terms), https://www.nyc.gov/site/tlc/about/tlc-trip-record-data.page
 2. NYC Taxi and Limousine Commission, *Data Dictionary: Yellow Taxi Trip Records*,
    https://www.nyc.gov/assets/tlc/downloads/pdf/data_dictionary_trip_records_yellow.pdf
-3. MinIO, *minio/minio repository* (README: community edition distributed as source code
-   only; archived by the owner on 25 April 2026), https://github.com/minio/minio
+3. MinIO, *minio/minio repository* (source only; archived on 25 April 2026),
+   https://github.com/minio/minio
 4. It's FOSS, *MinIO moves away from open source*,
    https://itsfoss.com/news/minio-moves-away-from-open-source/
 5. dbt Labs, *dbt Semantic Layer and MetricFlow*, https://docs.getdbt.com/docs/build/about-metricflow
