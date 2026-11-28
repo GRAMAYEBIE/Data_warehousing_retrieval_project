@@ -29,5 +29,9 @@ BEGIN
         GRANT SELECT ON analytics.pipeline_status, analytics.recon_bronze_silver
             TO metrics_reader;
     END IF;
+    -- Counts per vendor and month (no amount), for the VendorQualityDrop alert.
+    IF to_regclass('analytics.vendor_quality') IS NOT NULL THEN
+        GRANT SELECT ON analytics.vendor_quality TO metrics_reader;
+    END IF;
 END
 $$;

@@ -185,8 +185,10 @@ The bronze → silver reconciliation (`gold.recon_bronze_silver`) also matches e
 months, 86 million rows, none is unexplained. One month missed the 85 % target:
 **November 2025, 83.6 %**, because one vendor, Curb Mobility, reported negative amounts on
 12 % of its trips (9 % in October, 1 % in December; 0 % for the others). The rows stay,
-flagged; the dashboards and every answer on that month show the warning, and the vendor
-comparison of Dashboard 5 makes the cause visible.
+flagged; the dashboards and every answer on that month show the warning. An alert per
+vendor now flags such a month as soon as it is published (above 10 % invalid, or 3 points
+above the vendor's usual level); on the history it also caught Creative Mobile sending ever
+more duplicates, 0 in June 2026 to 25,349 (3.7 %) in September.
 
 ## 6. Dimensional model and dbt (Q4)
 
@@ -239,8 +241,8 @@ fails or when dbt tests fail.
 Five operational signals are written for every run: freshness, volume against the previous
 month (more than 50 % blocks publication), rejected-row rate, late-data rate and dbt test
 pass rate. They feed Dashboard 5 and Prometheus; Grafana shows the pipeline, the data age
-and quality, and 14 alert rules cover stale data, low valid-trip rate, failed runs, the
-assistant, a drifting forecast and a lagging Kafka consumer.
+and quality, and 15 alert rules cover stale data, low valid-trip rate, a vendor's data,
+failed runs, the assistant, a drifting forecast and a lagging Kafka consumer.
 
 ## 8. Semantic layer and governed metrics (Q6)
 

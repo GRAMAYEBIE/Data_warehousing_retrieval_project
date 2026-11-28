@@ -443,6 +443,92 @@
     "w": 12,
     "h": 6
    }
+  },
+  {
+   "type": "table",
+   "title": "dbt tests per run (last 20 runs)",
+   "description": "Every orchestrated run, latest first: a failing or erroring test blocks the publication.",
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "warehouse"
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "warehouse"
+     },
+     "rawSql": "SELECT run_id, min(recorded_at) AS recorded, count(*) AS tests,\n       count(*) FILTER (WHERE status = 'pass') AS passed,\n       count(*) FILTER (WHERE status IN ('fail', 'error')) AS failed,\n       count(*) FILTER (WHERE status = 'warn') AS warned,\n       round(100.0 * count(*) FILTER (WHERE status = 'pass') / count(*), 1) AS pass_pct\nFROM ops.dbt_test_results GROUP BY run_id ORDER BY min(recorded_at) DESC LIMIT 20",
+     "format": "table",
+     "refId": "A",
+     "editorMode": "code",
+     "rawQuery": true
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "cellOptions": {
+       "type": "auto"
+      }
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "showHeader": true,
+    "cellHeight": "sm"
+   },
+   "id": 10,
+   "gridPos": {
+    "x": 0,
+    "y": 40,
+    "w": 12,
+    "h": 9
+   }
+  },
+  {
+   "type": "table",
+   "title": "Data quality by vendor (last six months)",
+   "description": "Share of each vendor's trips that are invalid, duplicated or with a negative amount. Alert VendorQualityDrop: above 10 %, or 3 points above the vendor's usual level.",
+   "datasource": {
+    "type": "grafana-postgresql-datasource",
+    "uid": "warehouse"
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "grafana-postgresql-datasource",
+      "uid": "warehouse"
+     },
+     "rawSql": "SELECT to_char(source_month, 'YYYY-MM') AS month, vendor_name AS vendor, trips,\n       round(100.0 * invalid_trips / trips, 2) AS invalid_pct,\n       round(100.0 * duplicate_trips / trips, 2) AS duplicate_pct,\n       round(100.0 * negative_amount_trips / trips, 2) AS negative_amount_pct\nFROM analytics.vendor_quality\nWHERE trips >= 20000\n  AND source_month >= (SELECT max(source_month) FROM analytics.vendor_quality) - interval '5 months'\nORDER BY source_month DESC, invalid_pct DESC",
+     "format": "table",
+     "refId": "A",
+     "editorMode": "code",
+     "rawQuery": true
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "cellOptions": {
+       "type": "auto"
+      }
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "showHeader": true,
+    "cellHeight": "sm"
+   },
+   "id": 11,
+   "gridPos": {
+    "x": 12,
+    "y": 40,
+    "w": 12,
+    "h": 9
+   }
   }
  ],
  "templating": {

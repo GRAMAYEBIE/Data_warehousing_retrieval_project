@@ -111,6 +111,42 @@ nyc_ai_audit:
     - answers_24h: {usage: GAUGE, description: Answers in the last 24 hours}
     - median_seconds_24h: {usage: GAUGE, description: Median answer time in the last 24 hours}
 
+# Each vendor's share of invalid trips in the latest published month, against its own median
+# of the six months before. flagged = 1 (alert VendorQualityDrop) when the share is above
+# 10 %, or more than 3 points above that median (at least 3 months of history). On the 22
+# months published it flags Curb Mobility in November 2025 (12.0 %, negative amounts) and
+# Creative Mobile Technologies in August and September 2026 (3.3 % and 3.7 %, from about 0:
+# duplicates). Vendors with fewer than 20,000 trips in the month are left out.
+nyc_vendor_quality:
+  query: |
+    WITH v AS (
+        SELECT source_month, vendor_name, trips, duplicate_trips, negative_amount_trips,
+               invalid_trips::numeric / trips AS share
+        FROM analytics.vendor_quality WHERE trips >= 20000
+    )
+    SELECT v.vendor_name AS vendor, to_char(v.source_month, 'YYYY-MM') AS month,
+           v.share::float AS invalid_share, b.base AS baseline_share,
+           v.duplicate_trips::float / v.trips AS duplicate_share,
+           v.negative_amount_trips::float / v.trips AS negative_amount_share,
+           coalesce(v.share > 0.10 OR (b.n >= 3 AND v.share - b.base > 0.03), false)::int
+               AS flagged
+    FROM v
+    LEFT JOIN LATERAL (
+        SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY p.share) AS base, count(*) AS n
+        FROM v AS p
+        WHERE p.vendor_name = v.vendor_name AND p.source_month < v.source_month
+          AND p.source_month >= v.source_month - interval '6 months'
+    ) AS b ON true
+    WHERE v.source_month = (SELECT max(source_month) FROM v)
+  metrics:
+    - vendor: {usage: LABEL, description: Vendor that sent the trip records}
+    - month: {usage: LABEL, description: Latest published source month}
+    - invalid_share: {usage: GAUGE, description: Share of the vendor's trips that are invalid}
+    - baseline_share: {usage: GAUGE, description: Its median share over the six months before}
+    - duplicate_share: {usage: GAUGE, description: Share of the vendor's trips flagged duplicate}
+    - negative_amount_share: {usage: GAUGE, description: Share with a negative amount}
+    - flagged: {usage: GAUGE, description: 1 when the share is unusual for this vendor}
+
 # The latest forecast-against-actual check per target (ml/check.py): the live check of the
 # month when it exists, else its replay. drift = 1 raises the ForecastDrift alert.
 nyc_forecast_check:

@@ -16,6 +16,13 @@ groups:
         annotations:
           summary: "Valid-trip rate of the latest month is {{ $value | humanizePercentage }} (threshold 85 %)."
           action: "Pause decisions based on that month; open dashboard 5 and the Data quality board."
+      - alert: VendorQualityDrop
+        expr: nyc_vendor_quality_flagged == 1
+        for: 5m
+        labels: {severity: warning, layer: quality}
+        annotations:
+          summary: "{{ $labels.vendor }}: unusual share of invalid trips in {{ $labels.month }} (above 10 %, or 3 points above its usual level)."
+          action: "Dashboard 5, quality flags by vendor: duplicates, negative amounts? Ask the vendor, and decide whether to pause decisions on its trips."
       - alert: UnexplainedReconciliationRows
         expr: nyc_quality_unexplained_rows > 0
         labels: {severity: critical, layer: quality}

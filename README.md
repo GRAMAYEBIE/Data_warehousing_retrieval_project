@@ -23,7 +23,7 @@ the exam questions one by one and points back here for the details.
 | 3 | Airflow orchestration, publication gate, operational signals | **Built and verified** (successful run, failure and recovery, safe re-run) |
 | 4 | Semantic layer, Superset, six dashboards | **Built and verified**: semantic layer, metric parity 40/40 on three surfaces (MetricFlow, published SQL, Superset), 10 certified datasets, 6 dashboards (57 charts, each verified to return data) |
 | 5 | AI assistant: API, web interface, evaluation pack | **Built and verified**: governed planner, validator, approved templates, number checks (86 API tests); conversational answers streamed from a local model (`qwen2.5:7b`); React interface (Overview, Forecast, Shift planner, Ask, Report builder), voice input; evaluation pack |
-| 6 | Observability: metrics, logs, traces, alerts (Prometheus, Loki, Tempo, Grafana) | **Built and verified**: 12 services, 6 dashboards and 14 alert rules as code; a question gives a trace and a log line with the same trace id |
+| 6 | Observability: metrics, logs, traces, alerts (Prometheus, Loki, Tempo, Grafana) | **Built and verified**: 12 services, 6 dashboards and 15 alert rules as code; a question gives a trace and a log line with the same trace id |
 | 7 | MLflow and demand forecasting (needs six months) | **Built and verified**: trips and revenue per zone and hour; a seasonal baseline, an adjusted baseline and LightGBM compete on rolling backtests; every month is checked against what happened, drift is flagged and the next training reacts to it ([section 12](#demand-forecast-wave-7-profile-ml)) |
 | 8 | Kafka: provisional stream of the current month | **Built and verified**: June 2025 replayed through Kafka (4,322,960 trips, 74 rejected by the contract), watched live against its forecast ([section 12](#streaming-wave-8-profile-stream)) |
 
@@ -903,7 +903,7 @@ docker compose --profile core --profile observability up -d   # Grafana on http:
 | Metrics | Prometheus + exporters | host (node-exporter), every container (cAdvisor), PostgreSQL and the **pipeline state read from the ops tables** (postgres-exporter custom queries: last run, data age, months published, dbt failures, signals, valid-trip rate, unexplained rows, ingestion batches, AI audit), Airflow and Superset (StatsD), Redis, the assistant (`/metrics`: answers, step durations, model tokens, guardrails) |
 | Logs | Loki + Grafana Alloy | every container, labelled by Compose service; the assistant writes one line per answer with its trace id |
 | Traces | Tempo (OpenTelemetry) | one trace per question: HTTP request, guards, plan, validate, execute (SQL), narrate; span metrics and service graph |
-| Alerts | Prometheus rules + Alertmanager | 14 rules as code: stale data, valid-trip rate below 85 %, unexplained rows, failed run, failed dbt tests, slow or unavailable model, narratives replaced, memory and swap pressure, container restarts, component down, forecast drift, Kafka consumer lag |
+| Alerts | Prometheus rules + Alertmanager | 15 rules as code: stale data, valid-trip rate below 85 %, a vendor's unusual invalid share, unexplained rows, failed run, failed dbt tests, slow or unavailable model, narratives replaced, memory and swap pressure, container restarts, component down, forecast drift, Kafka consumer lag |
 
 Grafana opens on **"0. Platform overview: where is the problem?"**: one status per layer in
 the order the data flows (source, transformation and quality, BI and AI, host); each tile

@@ -77,6 +77,17 @@ PUBLISHED_TABLES: tuple[PublishedTable, ...] = (
 
 # Operational tables copied to analytics at each publication (no secret, no free text
 # from the source: only statuses, counts, checksums and messages written by the platform).
+# Trips, invalid trips and the main invalid flags per source month and vendor (from the BI
+# view just built): the input of the vendor quality alert (postgres-exporter queries.yml).
+VENDOR_QUALITY = """
+    SELECT source_month, vendor_name,
+           sum(trip_count) AS trips,
+           sum(invalid_trip_count) AS invalid_trips,
+           sum(duplicate_trip_count) AS duplicate_trips,
+           sum(negative_amount_trip_count) AS negative_amount_trips
+    FROM analytics.mv_quality_daily
+    GROUP BY source_month, vendor_name"""
+
 OPS_SNAPSHOTS: dict[str, str] = {
     "pipeline_runs": "SELECT * FROM ops.pipeline_runs",
     "pipeline_signals": "SELECT * FROM ops.pipeline_signals",
@@ -432,14 +443,19 @@ def publish(conn, run_id: str) -> dict:
             cur.execute(f"DROP TABLE IF EXISTS analytics.{name}")
             cur.execute(f"CREATE TABLE analytics.{name} AS {query}")
         counts |= create_bi_views(cur)
-        # The observability role reads the status and the reconciliation only, never the
-        # business aggregates (infra/postgres/init/07_observability.sql).
+        # Quality of each vendor's file per month, for the VendorQualityDrop alert: counts
+        # only, no amount. Observed: one vendor reported negative amounts on 12 % of its
+        # trips in November 2025, another sent ever more duplicates from July 2026.
+        cur.execute("DROP TABLE IF EXISTS analytics.vendor_quality")
+        cur.execute(f"CREATE TABLE analytics.vendor_quality AS {VENDOR_QUALITY}")
+        # The observability role reads the status, the reconciliation and the vendor quality
+        # counts only, never the business aggregates (infra/postgres/init/07_observability.sql).
         cur.execute(
             """
             DO $$ BEGIN
                 IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'metrics_reader') THEN
-                    GRANT SELECT ON analytics.pipeline_status, analytics.recon_bronze_silver
-                        TO metrics_reader;
+                    GRANT SELECT ON analytics.pipeline_status, analytics.recon_bronze_silver,
+                        analytics.vendor_quality TO metrics_reader;
                 END IF;
             END $$
             """
